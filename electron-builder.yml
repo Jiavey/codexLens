@@ -1,0 +1,36 @@
+appId: com.uu.codexsessionsviewer
+productName: Codex Sessions Viewer
+artifactName: ${productName}-${version}-${arch}.${ext}
+asar: true
+afterSign: scripts/notarize.mjs
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - '!dist-electron/**/*.map'
+  - '!dist-electron/**/*.d.ts'
+
+extraMetadata:
+  main: dist-electron/electron/main.js
+
+mac:
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  target:
+    - target: dmg
+    - target: zip
+  extendInfo:
+    NSDesktopFolderUsageDescription: 允许应用读取你选择的桌面会话目录。
+    NSDocumentsFolderUsageDescription: 允许应用读取你选择的文稿会话目录。
+    NSDownloadsFolderUsageDescription: 允许应用读取你选择的下载会话目录。
+    NSNetworkVolumesUsageDescription: 允许应用读取你选择的网络磁盘会话目录。
+    NSRemovableVolumesUsageDescription: 允许应用读取你选择的外接磁盘会话目录。

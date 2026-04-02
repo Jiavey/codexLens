@@ -1,0 +1,44 @@
+{
+  "name": "codex-sessions-view",
+  "private": true,
+  "version": "0.0.0",
+  "description": "本地查看 Codex sessions 的桌面查看器",
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron:watch\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:electron:watch": "npm run build:electron && tsc -b tsconfig.electron.json --watch --preserveWatchOutput",
+    "dev:electron": "wait-on tcp:5173 dist-electron/electron/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist-electron/electron/main.js",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vue-tsc -b && vite build",
+    "build:electron": "tsc -b tsconfig.electron.json --force",
+    "build:icon:mac": "node scripts/generate-mac-icon.mjs",
+    "pack:mac": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac dir",
+    "dist:mac:zip": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac zip",
+    "dist:mac:dmg": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac dmg",
+    "dist:mac": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac dmg zip",
+    "preview": "vite preview",
+    "start": "electron dist-electron/electron/main.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "vue": "^3.5.30"
+  },
+  "devDependencies": {
+    "@electron/notarize": "^3.1.1",
+    "@types/node": "^24.12.0",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "@vue/tsconfig": "^0.9.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.1.0",
+    "electron-builder": "^26.8.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.1",
+    "vitest": "^4.1.2",
+    "vue-tsc": "^3.2.5",
+    "wait-on": "^9.0.4"
+  }
+}
