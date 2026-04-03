@@ -3,7 +3,13 @@ import { appendFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { parseSessionFile, parseSessionFileTail, readRawRange, readSessionPreview } from './sessions-parser.js'
+import {
+  extractConversationMarkdown,
+  parseSessionFile,
+  parseSessionFileTail,
+  readRawRange,
+  readSessionPreview,
+} from './sessions-parser.js'
 
 const tempDirs: string[] = []
 
@@ -166,6 +172,69 @@ describe('sessions-parser', () => {
     })
   })
 
+  it('skips incomplete trailing json until the line is fully written', async () => {
+    const filePath = await createJsonl([
+      JSON.stringify({
+        timestamp: '2026-04-01T10:00:00.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'first line' }],
+        },
+      }),
+    ])
+
+    const initial = await parseSessionFile(filePath)
+
+    const completeLine = JSON.stringify({
+      timestamp: '2026-04-01T10:00:01.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'user_message',
+        message: 'second line',
+      },
+    })
+    const assistantLine = JSON.stringify({
+      timestamp: '2026-04-01T10:00:02.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'third line' }],
+      },
+    })
+    const splitAt = Math.max(1, assistantLine.length - 12)
+    const partialLineStart = assistantLine.slice(0, splitAt)
+    const partialLineEnd = `${assistantLine.slice(splitAt)}\n`
+
+    await appendFile(filePath, `${completeLine}\n${partialLineStart}`, 'utf8')
+
+    const firstTail = await parseSessionFileTail(filePath, initial.fileSize, initial.items.length)
+
+    expect(firstTail.items).toHaveLength(1)
+    expect(firstTail.items[0]).toMatchObject({
+      bucket: 'user',
+      role: 'user_message',
+      textPreview: 'second line',
+    })
+
+    await appendFile(filePath, partialLineEnd, 'utf8')
+
+    const secondTail = await parseSessionFileTail(
+      filePath,
+      firstTail.fileSize,
+      initial.items.length + firstTail.items.length,
+    )
+
+    expect(secondTail.items).toHaveLength(1)
+    expect(secondTail.items[0]).toMatchObject({
+      bucket: 'codex',
+      title: 'Codex 回复',
+      textPreview: 'third line',
+    })
+  })
+
   it('normalizes multiline preview text into a single paragraph summary', async () => {
     const filePath = await createJsonl([
       JSON.stringify({
@@ -217,7 +286,7 @@ describe('sessions-parser', () => {
         type: 'session_meta',
         payload: {
           timestamp: '2026-04-01T10:00:57.860Z',
-          cwd: '/Users/uu/project/codex-sessions-view',
+          cwd: '~/project/codex-sessions-view',
         },
       }),
       JSON.stringify({
@@ -229,7 +298,7 @@ describe('sessions-parser', () => {
           content: [
             {
               type: 'input_text',
-              text: '# AGENTS.md instructions for /Users/uu/project/codex-sessions-view',
+              text: '# AGENTS.md instructions for ~/project/codex-sessions-view',
             },
           ],
         },
@@ -259,5 +328,49 @@ describe('sessions-parser', () => {
     expect(preview.displayTitle.startsWith('帮我把目录树里的 jsonl 文件标题')).toBe(true)
     expect(preview.displayTitle.endsWith('…')).toBe(true)
     expect(preview.displayTitle.length).toBeLessThanOrEqual(32)
+  })
+
+  it('extracts full markdown for conversation items', () => {
+    const userMarkdown = extractConversationMarkdown(
+      JSON.stringify({
+        timestamp: '2026-04-01T10:01:00.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '# 标题\n\n- 第一项\n- 第二项' },
+            { type: 'input_image', image_url: 'file:///tmp/a.png' },
+          ],
+        },
+      }),
+    )
+    const codexMarkdown = extractConversationMarkdown(
+      JSON.stringify({
+        timestamp: '2026-04-01T10:02:00.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '```ts\nconsole.log(\"ok\")\n```' },
+          ],
+        },
+      }),
+    )
+    const streamedMarkdown = extractConversationMarkdown(
+      JSON.stringify({
+        timestamp: '2026-04-01T10:03:00.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'agent_message',
+          message: 'streaming...',
+        },
+      }),
+    )
+
+    expect(userMarkdown).toBe('# 标题\n\n- 第一项\n- 第二项\n\n> [图片输入]')
+    expect(codexMarkdown).toBe('```ts\nconsole.log(\"ok\")\n```')
+    expect(streamedMarkdown).toBeNull()
   })
 })

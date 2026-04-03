@@ -55,14 +55,13 @@
 
   <g filter="url(#plateShadow)">
     <rect x="96" y="96" width="832" height="832" rx="188" fill="#FFFDF9"/>
-    <rect x="96" y="96" width="832" height="832" rx="188" stroke="#E8DDD0" stroke-width="6"/>
   </g>
 
   <g clip-path="url(#macClip)">
     <rect width="1024" height="1024" fill="url(#tealGlow)"/>
     <rect width="1024" height="1024" fill="url(#orangeGlow)"/>
 
-    <g transform="translate(10 22) scale(0.94)">
+    <g transform="translate(10 102) scale(0.94)">
       <g filter="url(#shadow)">
         <path d="M319 365C319 239.072 421.072 137 547 137C672.928 137 775 239.072 775 365V541C775 699.489 646.489 828 488 828C393.559 828 317 751.441 317 657V403C317 389.902 317.675 377.229 319 365Z" fill="url(#peaShell)"/>
 
@@ -80,13 +79,6 @@
         <ellipse cx="604" cy="448" rx="17" ry="22" fill="#38322C"/>
         <ellipse cx="484" cy="439" rx="5" ry="6.5" fill="#FFF8EF"/>
         <ellipse cx="598" cy="439" rx="5" ry="6.5" fill="#FFF8EF"/>
-
-        <path d="M533 459C544.046 459 553 450.046 553 439" stroke="#C7B7A2" stroke-width="9" stroke-linecap="round" opacity=".5"/>
-        <path d="M562 459C573.046 459 582 450.046 582 439" stroke="#C7B7A2" stroke-width="9" stroke-linecap="round" opacity=".5"/>
-
-        <path d="M528 483C528 472.507 536.507 464 547 464H549C559.493 464 568 472.507 568 483V486L548 499L528 486V483Z" fill="#DD5E3F"/>
-        <path d="M548 500C540.461 505.821 536.386 511.385 535 517" stroke="#8A4E44" stroke-width="8" stroke-linecap="round"/>
-        <path d="M548 500C555.539 505.821 559.614 511.385 561 517" stroke="#8A4E44" stroke-width="8" stroke-linecap="round"/>
 
         <path d="M436 548C459.208 573.616 489.277 588 521.5 588C553.723 588 583.792 573.616 607 548" stroke="#A77D6E" stroke-width="12" stroke-linecap="round"/>
 

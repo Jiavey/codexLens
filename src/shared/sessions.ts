@@ -40,6 +40,7 @@ export interface SessionMetaSummary {
   cliVersion?: string
   source?: string
   modelProvider?: string
+  authMode?: string
 }
 
 export interface SessionItemSummary {
@@ -60,6 +61,7 @@ export interface OpenFileResult {
   name: string
   preview: SessionPreview
   totalCount: number
+  conversationCount: number
   initialStart: number
   initialItems: SessionItemSummary[]
   meta: SessionMetaSummary | null
@@ -85,6 +87,21 @@ export interface RawItemResult {
   parseError?: string
 }
 
+export interface ConversationItemDetail {
+  index: number
+  timestamp: string | null
+  bucket: Extract<SessionBucket, 'user' | 'codex'>
+  role: string
+  speakerLabel: string
+  avatarColor: string
+  markdown: string
+}
+
+export interface ConversationItemsResult {
+  path: string
+  items: ConversationItemDetail[]
+}
+
 export interface TreeChangedPayload {
   rootPath: string
   available: boolean
@@ -95,6 +112,7 @@ export interface FilePatchedPayload {
   path: string
   mode: 'append' | 'reset'
   totalCount: number
+  conversationCount?: number
   startIndex?: number
   items?: SessionItemSummary[]
 }
@@ -109,6 +127,7 @@ export interface SessionsApi {
   openFile: (path: string) => Promise<OpenFileResult>
   getItems: (request: GetItemsRequest) => Promise<SessionItemSummary[]>
   getRawItem: (request: RawItemRequest) => Promise<RawItemResult>
+  getConversationItems: (path: string) => Promise<ConversationItemsResult>
   onTreeChanged: (listener: (payload: TreeChangedPayload) => void) => Unsubscribe
   onFilePatched: (listener: (payload: FilePatchedPayload) => void) => Unsubscribe
 }

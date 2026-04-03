@@ -1,8 +1,8 @@
 {
-  "name": "codex-sessions-view",
+  "name": "codex-lens",
   "private": true,
-  "version": "0.0.0",
-  "description": "本地查看 Codex sessions 的桌面查看器",
+  "version": "1.0.0",
+  "description": "一款关于Codex历史会话查看的放大镜应用。",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -24,6 +24,8 @@
   },
   "dependencies": {
     "chokidar": "^5.0.0",
+    "dompurify": "^3.3.3",
+    "marked": "^17.0.5",
     "vue": "^3.5.30"
   },
   "devDependencies": {

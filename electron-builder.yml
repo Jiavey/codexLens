@@ -1,5 +1,5 @@
-appId: com.uu.codexsessionsviewer
-productName: Codex Sessions Viewer
+appId: com.uu.codexlens
+productName: CodexLens
 artifactName: ${productName}-${version}-${arch}.${ext}
 asar: true
 afterSign: scripts/notarize.mjs
