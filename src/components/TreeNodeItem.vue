@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import type { TreeNode } from '../shared/sessions'
+import { maskDisplayText } from '../utils/display'
 
 defineOptions({
   name: 'TreeNodeItem',
@@ -58,11 +59,11 @@ function requestDelete(): void {
 
 function rowTitle(): string {
   if (isDirectory.value) {
-    return props.node.name
+    return maskDisplayText(props.node.name)
   }
 
-  const rawName = props.node.preview?.rawName ?? props.node.name
-  return `${rawName}\n${props.node.path}`
+  const rawName = maskDisplayText(props.node.preview?.rawName ?? props.node.name)
+  return `${rawName}\n${maskDisplayText(props.node.path)}`
 }
 
 function formatSize(size?: number): string {
@@ -100,12 +101,12 @@ function formatSize(size?: number): string {
         {{ isDirectory ? (expanded ? '▾' : '▸') : '·' }}
       </span>
 
-      <span class="tree-content">
-        <span class="tree-name">
-          {{ isDirectory ? node.name : (node.preview?.displayTitle ?? node.name) }}
+        <span class="tree-content">
+          <span class="tree-name">
+          {{ maskDisplayText(isDirectory ? node.name : (node.preview?.displayTitle ?? node.name)) }}
         </span>
         <span v-if="!isDirectory && node.preview?.subtitle" class="tree-subtitle">
-          {{ node.preview.subtitle }}
+          {{ maskDisplayText(node.preview.subtitle) }}
         </span>
       </span>
 

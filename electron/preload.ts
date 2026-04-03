@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 import type {
+  ConversationItemsResult,
   FilePatchedPayload,
   GetItemsRequest,
   RawItemRequest,
@@ -16,6 +17,8 @@ const api: SessionsApi = {
   openFile: (path) => ipcRenderer.invoke('sessions:openFile', path),
   getItems: (request: GetItemsRequest) => ipcRenderer.invoke('sessions:getItems', request),
   getRawItem: (request: RawItemRequest) => ipcRenderer.invoke('sessions:getRawItem', request),
+  getConversationItems: (path: string) =>
+    ipcRenderer.invoke('sessions:getConversationItems', path) as Promise<ConversationItemsResult>,
   onTreeChanged: (listener: (payload: TreeChangedPayload) => void) => {
     const wrapped = (_event: unknown, payload: TreeChangedPayload) => listener(payload)
     ipcRenderer.on('sessions:treeChanged', wrapped)

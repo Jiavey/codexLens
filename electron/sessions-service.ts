@@ -1,11 +1,13 @@
 import { app, dialog, BrowserWindow, type OpenDialogOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import chokidar, { type FSWatcher } from 'chokidar'
 
 import {
+  type ConversationItemDetail,
+  type ConversationItemsResult,
   ITEM_PAGE_SIZE,
   type FilePatchedPayload,
   type OpenFileResult,
@@ -18,12 +20,15 @@ import {
   type TreeResponse,
 } from '../src/shared/sessions.js'
 import {
+  extractConversationMarkdown,
   parseSessionFile,
   parseSessionFileTail,
   readRawRange,
   readSessionPreview,
   type ParsedFileContext,
 } from './sessions-parser.js'
+import { readThreadAccountInfo } from './thread-account-store.js'
+import { deleteThreadRecordsForRolloutPath } from './thread-store.js'
 
 const DEFAULT_ROOT_PATH = join(homedir(), '.codex', 'sessions')
 const MAX_CONTEXT_CACHE = 4
@@ -44,6 +49,10 @@ export class SessionsService {
   private rootWatcher: FSWatcher | null = null
   private activeFileWatcher: FSWatcher | null = null
   private activeFilePath: string | null = null
+  private activeWatchedFilePath: string | null = null
+  private activeFileSyncTimer: NodeJS.Timeout | null = null
+  private activeFileSyncPendingPath: string | null = null
+  private activeFileSyncRunning = false
   private contexts = new Map<string, CachedContext>()
   private previewCache = new Map<string, CachedPreview>()
   private rawCache = new Map<string, RawItemResult>()
@@ -66,6 +75,11 @@ export class SessionsService {
     if (this.treeChangeTimer) {
       clearTimeout(this.treeChangeTimer)
       this.treeChangeTimer = null
+    }
+
+    if (this.activeFileSyncTimer) {
+      clearTimeout(this.activeFileSyncTimer)
+      this.activeFileSyncTimer = null
     }
 
     await Promise.allSettled([
@@ -149,6 +163,7 @@ export class SessionsService {
       }
     }
 
+    deleteThreadRecordsForRolloutPath(absolutePath)
     await fs.unlink(absolutePath)
     this.lastUpdatedAt = new Date().toISOString()
   }
@@ -166,6 +181,7 @@ export class SessionsService {
       name: context.name,
       preview: context.preview,
       totalCount: context.items.length,
+      conversationCount: this.countConversationItems(context.items),
       initialStart,
       initialItems: context.items.slice(initialStart),
       meta: context.meta,
@@ -224,6 +240,43 @@ export class SessionsService {
     return result
   }
 
+  async getConversationItems(filePath: string): Promise<ConversationItemsResult> {
+    await this.init()
+    const absolutePath = resolve(filePath)
+    const context = await this.getContext(absolutePath, false)
+    const details: ConversationItemDetail[] = []
+
+    for (let index = 0; index < context.items.length; index += 1) {
+      const item = context.items[index]
+
+      if (!this.shouldIncludeConversationItem(context.items, index)) {
+        continue
+      }
+
+      const rawText = await readRawRange(absolutePath, item.rawByteStart, item.rawByteEnd)
+      const markdown = extractConversationMarkdown(rawText)
+
+      if (!markdown) {
+        continue
+      }
+
+      details.push({
+        index: item.index,
+        timestamp: item.timestamp,
+        bucket: item.bucket as ConversationItemDetail['bucket'],
+        role: item.role,
+        speakerLabel: item.speakerLabel,
+        avatarColor: item.avatarColor,
+        markdown,
+      })
+    }
+
+    return {
+      path: absolutePath,
+      items: details,
+    }
+  }
+
   async handleActiveFileChange(filePath: string): Promise<void> {
     await this.init()
     const absolutePath = resolve(filePath)
@@ -233,7 +286,19 @@ export class SessionsService {
       return
     }
 
-    const stat = await fs.stat(absolutePath)
+    let stat
+
+    try {
+      stat = await fs.stat(absolutePath)
+    } catch {
+      this.broadcastFilePatched({
+        path: absolutePath,
+        mode: 'reset',
+        totalCount: 0,
+        conversationCount: 0,
+      })
+      return
+    }
 
     if (stat.size < cached.fileSize) {
       const rebuilt = await this.refreshContext(absolutePath)
@@ -242,6 +307,7 @@ export class SessionsService {
         path: absolutePath,
         mode: 'reset',
         totalCount: rebuilt.items.length,
+        conversationCount: this.countConversationItems(rebuilt.items),
       })
       return
     }
@@ -254,7 +320,7 @@ export class SessionsService {
     const tail = await parseSessionFileTail(absolutePath, cached.fileSize, startIndex)
 
     if (tail.items.length === 0) {
-      cached.fileSize = stat.size
+      cached.fileSize = tail.fileSize
       cached.mtime = stat.mtimeMs
       return
     }
@@ -268,6 +334,7 @@ export class SessionsService {
       path: absolutePath,
       mode: 'append',
       totalCount: cached.items.length,
+      conversationCount: this.countConversationItems(cached.items),
       startIndex,
       items: tail.items,
     })
@@ -314,8 +381,10 @@ export class SessionsService {
 
   private async refreshContext(filePath: string): Promise<CachedContext> {
     const parsed = await parseSessionFile(filePath)
+    const attributionInfo = readThreadAccountInfo(parsed.meta?.id)
     const cached: CachedContext = {
       ...parsed,
+      meta: parsed.meta || attributionInfo ? { ...parsed.meta, ...attributionInfo } : null,
       accessedAt: Date.now(),
     }
 
@@ -463,37 +532,79 @@ export class SessionsService {
   }
 
   private async attachActiveFileWatcher(filePath: string): Promise<void> {
-    if (this.activeFilePath === filePath && this.activeFileWatcher) {
+    if (this.activeWatchedFilePath === filePath && this.activeFileWatcher) {
       return
     }
 
-    this.activeFilePath = filePath
     await this.detachActiveFileWatcher()
+    this.activeWatchedFilePath = filePath
 
-    this.activeFileWatcher = chokidar.watch(filePath, {
+    this.activeFileWatcher = chokidar.watch(dirname(filePath), {
       ignoreInitial: true,
-      awaitWriteFinish: {
-        stabilityThreshold: 180,
-        pollInterval: 60,
-      },
+      depth: 0,
     })
 
+    const matchesTarget = (candidatePath: string) => resolve(candidatePath) === filePath
+
+    const scheduleSync = (candidatePath: string) => {
+      if (!matchesTarget(candidatePath)) {
+        return
+      }
+
+      this.scheduleActiveFileSync(filePath)
+    }
+
     this.activeFileWatcher
-      .on('change', () => {
-        void this.handleActiveFileChange(filePath)
-      })
-      .on('unlink', () => {
-        this.broadcastFilePatched({
-          path: filePath,
-          mode: 'reset',
-          totalCount: 0,
-        })
-      })
+      .on('add', scheduleSync)
+      .on('change', scheduleSync)
+      .on('unlink', scheduleSync)
   }
 
   private async detachActiveFileWatcher(): Promise<void> {
     await this.activeFileWatcher?.close()
     this.activeFileWatcher = null
+    this.activeWatchedFilePath = null
+    this.activeFileSyncPendingPath = null
+
+    if (this.activeFileSyncTimer) {
+      clearTimeout(this.activeFileSyncTimer)
+      this.activeFileSyncTimer = null
+    }
+  }
+
+  private scheduleActiveFileSync(filePath: string): void {
+    this.activeFileSyncPendingPath = resolve(filePath)
+
+    if (this.activeFileSyncTimer) {
+      clearTimeout(this.activeFileSyncTimer)
+    }
+
+    // Coalesce bursts from directory-level and atomic write events.
+    this.activeFileSyncTimer = setTimeout(() => {
+      this.activeFileSyncTimer = null
+      void this.flushActiveFileSync()
+    }, 60)
+  }
+
+  private async flushActiveFileSync(): Promise<void> {
+    const pendingPath = this.activeFileSyncPendingPath
+
+    if (!pendingPath || this.activeFileSyncRunning) {
+      return
+    }
+
+    this.activeFileSyncPendingPath = null
+    this.activeFileSyncRunning = true
+
+    try {
+      await this.handleActiveFileChange(pendingPath)
+    } finally {
+      this.activeFileSyncRunning = false
+
+      if (this.activeFileSyncPendingPath && this.activeFileSyncPendingPath === this.activeFilePath) {
+        void this.flushActiveFileSync()
+      }
+    }
   }
 
   private async loadPersistedRoot(): Promise<string | null> {
@@ -652,5 +763,92 @@ export class SessionsService {
     }
 
     return this.getNodeSortValue(firstChild)
+  }
+
+  private countConversationItems(items: SessionItemSummary[]): number {
+    let count = 0
+
+    for (let index = 0; index < items.length; index += 1) {
+      if (this.shouldIncludeConversationItem(items, index)) {
+        count += 1
+      }
+    }
+
+    return count
+  }
+
+  private shouldIncludeConversationItem(items: SessionItemSummary[], index: number): boolean {
+    const item = items[index]
+
+    if (!item) {
+      return false
+    }
+
+    if (this.isRedundantUserMessageEvent(items, index)) {
+      return false
+    }
+
+    if (item.bucket === 'user') {
+      return true
+    }
+
+    return item.bucket === 'codex' && item.role !== 'agent_message'
+  }
+
+  private isRedundantUserMessageEvent(items: SessionItemSummary[], index: number): boolean {
+    const item = items[index]
+
+    if (!item || item.bucket !== 'user' || item.role !== 'user_message') {
+      return false
+    }
+
+    const normalizedText = this.normalizeConversationText(item.textPreview)
+
+    if (!normalizedText) {
+      return false
+    }
+
+    for (let offset = -2; offset <= 2; offset += 1) {
+      if (offset === 0) {
+        continue
+      }
+
+      const candidate = items[index + offset]
+
+      if (!candidate || candidate.bucket !== 'user' || candidate.role !== 'user') {
+        continue
+      }
+
+      if (this.normalizeConversationText(candidate.textPreview) !== normalizedText) {
+        continue
+      }
+
+      const timeDelta = this.getTimestampDeltaMs(item.timestamp, candidate.timestamp)
+
+      if (timeDelta === null || timeDelta <= 5000) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private normalizeConversationText(value: string): string {
+    return value.replace(/\s+/g, ' ').trim()
+  }
+
+  private getTimestampDeltaMs(left: string | null, right: string | null): number | null {
+    if (!left || !right) {
+      return null
+    }
+
+    const leftValue = Date.parse(left)
+    const rightValue = Date.parse(right)
+
+    if (Number.isNaN(leftValue) || Number.isNaN(rightValue)) {
+      return null
+    }
+
+    return Math.abs(leftValue - rightValue)
   }
 }

@@ -27,6 +27,14 @@ interface ParsedLine {
 
 type JsonObject = Record<string, unknown>
 
+interface StreamJsonlOptions {
+  emitTrailingPartial?: boolean
+}
+
+interface StreamJsonlResult {
+  nextOffset: number
+}
+
 interface PreviewState {
   meta: SessionMetaSummary | null
   firstTimestamp: string | null
@@ -35,16 +43,15 @@ interface PreviewState {
 }
 
 export async function parseSessionFile(filePath: string): Promise<ParsedFileContext> {
-  const stat = await fs.stat(filePath)
   const items: SessionItemSummary[] = []
   const previewState: PreviewState = createPreviewState()
-
-  await streamJsonl(filePath, 0, (rawLine, rawByteStart, rawByteEnd) => {
+  const streamResult = await streamJsonl(filePath, 0, (rawLine, rawByteStart, rawByteEnd) => {
     const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, items.length)
     items.push(parsedLine.summary)
 
     collectPreviewFromRawLine(rawLine, previewState, parsedLine.meta)
   })
+  const stat = await fs.stat(filePath)
 
   return {
     path: filePath,
@@ -52,7 +59,7 @@ export async function parseSessionFile(filePath: string): Promise<ParsedFileCont
     preview: buildSessionPreview(basename(filePath), previewState),
     items,
     meta: previewState.meta,
-    fileSize: stat.size,
+    fileSize: streamResult.nextOffset,
     mtime: stat.mtimeMs,
   }
 }
@@ -90,17 +97,21 @@ export async function parseSessionFileTail(
   fromByte: number,
   startIndex: number,
 ): Promise<{ items: SessionItemSummary[]; fileSize: number; mtime: number }> {
-  const stat = await fs.stat(filePath)
   const items: SessionItemSummary[] = []
-
-  await streamJsonl(filePath, fromByte, (rawLine, rawByteStart, rawByteEnd) => {
-    const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, startIndex + items.length)
-    items.push(parsedLine.summary)
-  })
+  const streamResult = await streamJsonl(
+    filePath,
+    fromByte,
+    (rawLine, rawByteStart, rawByteEnd) => {
+      const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, startIndex + items.length)
+      items.push(parsedLine.summary)
+    },
+    { emitTrailingPartial: false },
+  )
+  const stat = await fs.stat(filePath)
 
   return {
     items,
-    fileSize: stat.size,
+    fileSize: streamResult.nextOffset,
     mtime: stat.mtimeMs,
   }
 }
@@ -124,17 +135,48 @@ export async function readRawRange(filePath: string, start: number, end: number)
   return Buffer.concat(chunks).toString('utf8')
 }
 
+export function extractConversationMarkdown(rawLine: string): string | null {
+  if (!rawLine.trim()) {
+    return null
+  }
+
+  try {
+    const record = JSON.parse(rawLine) as JsonObject
+    const type = readString(record.type)
+    const payload = readObject(record.payload)
+    const payloadType = payload ? readString(payload.type) : null
+
+    if (type === 'response_item' && payloadType === 'message' && payload) {
+      const responseRole = readString(payload.role)
+
+      if (responseRole === 'user' || responseRole === 'assistant') {
+        return extractContentMarkdown(payload)
+      }
+    }
+
+    if (type === 'event_msg' && payload && payloadType === 'user_message') {
+      return normalizeMarkdownText(readString(payload.message) ?? '用户消息事件')
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
 async function streamJsonl(
   filePath: string,
   startByte: number,
   onLine: (rawLine: string, rawByteStart: number, rawByteEnd: number) => void,
-): Promise<void> {
+  options: StreamJsonlOptions = {},
+): Promise<StreamJsonlResult> {
   const stream = createReadStream(filePath, {
     start: startByte,
   })
 
   let pending = Buffer.alloc(0)
   let cursor = startByte
+  let nextOffset = startByte
 
   for await (const chunk of stream) {
     const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
@@ -154,6 +196,7 @@ async function streamJsonl(
       const rawByteEnd = normalizeRawLineEnd(lineBuffer, chunkStart + newlineIndex)
 
       onLine(lineBuffer.toString('utf8').replace(/\r$/, ''), rawByteStart, rawByteEnd)
+      nextOffset = chunkStart + newlineIndex + 1
       searchStart = newlineIndex + 1
     }
 
@@ -161,11 +204,14 @@ async function streamJsonl(
     cursor += chunkBuffer.length
   }
 
-  if (pending.length > 0) {
+  if (pending.length > 0 && options.emitTrailingPartial !== false) {
     const rawByteStart = cursor - pending.length
     const rawByteEnd = normalizeRawLineEnd(pending, cursor)
     onLine(pending.toString('utf8').replace(/\r$/, ''), rawByteStart, rawByteEnd)
+    nextOffset = cursor
   }
+
+  return { nextOffset }
 }
 
 function normalizeRawLineEnd(buffer: Buffer, fallbackEnd: number): number {
@@ -541,6 +587,39 @@ function extractContentPreview(payload: JsonObject): string {
   }
 
   return truncate(normalizeInlineText(parts.filter(Boolean).join(' ')) || '无文本内容', 280)
+}
+
+function extractContentMarkdown(payload: JsonObject): string {
+  const content = Array.isArray(payload.content) ? payload.content : []
+  const parts: string[] = []
+
+  for (const part of content) {
+    const item = readObject(part)
+
+    if (!item) {
+      continue
+    }
+
+    const type = readString(item.type)
+
+    if (type === 'input_text' || type === 'output_text') {
+      parts.push(normalizeMarkdownText(readString(item.text) ?? readString(item.input_text) ?? `[${type}]`))
+      continue
+    }
+
+    if (type === 'input_image') {
+      parts.push('> [图片输入]')
+      continue
+    }
+
+    parts.push(`> [${type ?? 'unknown'}]`)
+  }
+
+  return parts.filter(Boolean).join('\n\n').trim() || '无文本内容'
+}
+
+function normalizeMarkdownText(value: string): string {
+  return value.replace(/\r\n/g, '\n').trim()
 }
 
 function normalizeInlineText(value: string): string {

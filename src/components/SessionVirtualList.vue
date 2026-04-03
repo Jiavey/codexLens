@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type { SessionItemSummary } from '../shared/sessions'
+import { maskDisplayText } from '../utils/display'
 
 const props = withDefaults(
   defineProps<{
@@ -163,14 +164,14 @@ defineExpose({
               <div class="session-copy-top">
                 <div class="session-heading">
                   <strong class="session-speaker">{{ row.item.speakerLabel }}</strong>
-                  <span class="session-title" :title="row.item.title">{{ row.item.title }}</span>
+                  <span class="session-title" :title="maskDisplayText(row.item.title)">{{ maskDisplayText(row.item.title) }}</span>
                 </div>
 
                 <time>{{ formatTimestamp(row.item.timestamp) }}</time>
               </div>
 
               <div class="session-role">{{ row.item.role }}</div>
-              <p>{{ row.item.textPreview }}</p>
+              <p>{{ maskDisplayText(row.item.textPreview) }}</p>
             </div>
           </button>
 
