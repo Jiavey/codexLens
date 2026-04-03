@@ -3,6 +3,16 @@
   "private": true,
   "version": "1.0.0",
   "description": "一款关于Codex历史会话查看的放大镜应用。",
+  "license": "MIT",
+  "author": "Jiavey",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jiavey/codexLens.git"
+  },
+  "homepage": "https://github.com/Jiavey/codexLens",
+  "bugs": {
+    "url": "https://github.com/Jiavey/codexLens/issues"
+  },
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {

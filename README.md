@@ -2,51 +2,53 @@
 
 # CodexLens
 
-An app that lets you inspect Codex conversation history with a magnifying-glass view.
+一款关于Codex历史会话查看的放大镜应用。
 
-[简体中文](./README.zh-CN.md) | English
+简体中文 | [English](./README.en.md)
 
-![Version](https://img.shields.io/badge/version-1.0.0-E46845)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-14A38B)
-![Stack](https://img.shields.io/badge/stack-Vue%203%20%2B%20Vite%20%2B%20Electron-445FC6)
+![版本](https://img.shields.io/badge/版本-1.0.0-E46845)
+![平台](https://img.shields.io/badge/平台-macOS%20%7C%20Windows-14A38B)
+![技术栈](https://img.shields.io/badge/技术栈-Vue%203%20%2B%20Vite%20%2B%20Electron-445FC6)
 
 </div>
 
-## Overview
+## 项目简介
 
-CodexLens is a local desktop viewer for browsing Codex session files under `~/.codex/sessions`.
-It focuses on fast session discovery, role-aware timelines, live file updates, and lightweight memory usage.
+CodexLens 是一个本地桌面查看器，用来浏览 `~/.codex/sessions` 下的 Codex 会话记录。
+它强调快速定位会话、按角色区分消息、实时监听文件变化，以及尽量克制的内存占用。
+应用完全本地运行，只读取你选择的会话目录，不会上传会话内容。
 
-## Documentation
+## 文档入口
 
-- macOS installation guide: [macOS Installation Guide](./docs/macos-install.en.md)
-- Chinese installation guide: [macos安装说明](./docs/macos-install.md)
+- macOS 安装说明：[macos安装说明](./docs/macos-install.md)
+- English install guide: [macOS Installation Guide](./docs/macos-install.en.md)
 
-## Features
+## 功能特性
 
-- Project-grouped session tree with recent-first ordering
-- Role-aware conversation timeline for `user`, `codex`, `developer`, and `system/tool`
-- Live updates when session files are appended or changed locally
-- Conversation-only mode with duplicate user-event filtering
-- Full conversation preview rendered as Markdown-style chat bubbles
-- On-demand raw JSON viewer with delayed loading to reduce memory pressure
+- 按项目分组展示会话树，并按最近更新时间倒序排列
+- 按 `user`、`codex`、`developer`、`system/tool` 区分时间线内容
+- 监听本地会话文件新增内容，支持实时刷新
+- 支持删除会话文件，并同步删除 `~/.codex/state_5.sqlite` 里的对应线程记录
+- 支持“只显示对话”，并过滤重复的用户事件消息
+- 支持完整对话预览，并以 Markdown 风格聊天气泡渲染
+- 支持按需加载原始 JSON，减少一次性内存占用
 
-## Quick Start
+## 开发启动
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Build
+## 构建
 
 ```bash
 npm run build
 ```
 
-## Packaging
+## 打包说明
 
-All build outputs are generated under `release/`.
+所有产物默认输出到 `release/` 目录。
 
 ### macOS
 
@@ -57,43 +59,26 @@ npm run dist:mac:zip
 npm run dist:mac
 ```
 
-- `pack:mac`: builds the unpacked `.app` for local verification
-- `dist:mac:dmg`: builds distributable `.dmg`
-- `dist:mac:zip`: builds distributable `.zip`
-- `dist:mac`: builds both `dmg + zip`
+- `pack:mac`：生成解包后的 `.app`，适合本机验包
+- `dist:mac:dmg`：生成可分发的 `.dmg`
+- `dist:mac:zip`：生成可分发的 `.zip`
+- `dist:mac`：同时生成 `dmg + zip`
 
 ### Windows
 
-NSIS installers can be built with `electron-builder`:
+Windows 安装包使用 `NSIS` 生成：
 
 ```bash
 npx electron-builder --config electron-builder.yml --win nsis --x64
 npx electron-builder --config electron-builder.yml --win nsis --arm64
 ```
 
-## macOS Signing / Notarization
+## 权限说明
 
-For local testing, unsigned builds are usually enough.
-For distribution to other Macs, configure these environment variables before packaging:
+当前应用不会请求相机、麦克风、屏幕录制或定位权限。
+它只会读取用户选择的本地会话目录，以及默认的 `~/.codex/sessions`。
 
-- `APPLE_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-- `APPLE_TEAM_ID`
-- `CSC_LINK` or a locally available `Developer ID Application` certificate
-
-The project already includes:
-
-- `electron-builder.yml`
-- `build/entitlements.mac.plist`
-- `build/entitlements.mac.inherit.plist`
-- `scripts/notarize.mjs`
-
-## Permissions
-
-The app does not request camera, microphone, screen recording, or location access.
-It only reads the session directory selected by the user, plus the default `~/.codex/sessions` source.
-
-## Tech Stack
+## 技术栈
 
 - Vue 3
 - Vite
@@ -101,8 +86,14 @@ It only reads the session directory selected by the user, plus the default `~/.c
 - TypeScript
 - Chokidar
 
-## Release Notes
+## 当前版本信息
 
-- Current app name: `CodexLens`
-- Current release version: `1.0.0`
-- Copyright: `Copyright © 2026 Weiweimao.`
+- 应用名：`CodexLens`
+- 当前版本：`1.0.0`
+- 版权所有：`Copyright © 2026 Weiweimao.`
+
+## 开源协作
+
+- 许可证：[MIT](./LICENSE)
+- 贡献指南：[CONTRIBUTING.md](./CONTRIBUTING.md)
+- 问题反馈：[GitHub Issues](https://github.com/Jiavey/codexLens/issues)
