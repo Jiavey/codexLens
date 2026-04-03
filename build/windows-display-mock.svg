@@ -37,7 +37,7 @@
   <rect x="190" y="520" width="238" height="14" rx="7" fill="url(#accent)"/>
   <text x="160" y="610" fill="#2D2923" font-size="22" font-family="Arial, PingFang SC, sans-serif" font-weight="700">你现在在 Windows 上大概率会看到：</text>
   <text x="160" y="650" fill="#5B5046" font-size="20" font-family="Arial, PingFang SC, sans-serif">• 安装窗口标题 / 文案：CodexLens</text>
-  <text x="160" y="688" fill="#5B5046" font-size="20" font-family="Arial, PingFang SC, sans-serif">• 安装包文件名：CodexLens-1.0.0-x64.exe / arm64.exe</text>
+  <text x="160" y="688" fill="#5B5046" font-size="20" font-family="Arial, PingFang SC, sans-serif">• 安装包文件名：CodexLens-1.0.1-x64.exe / arm64.exe</text>
   <text x="160" y="726" fill="#5B5046" font-size="20" font-family="Arial, PingFang SC, sans-serif">• 不会出现 macOS“关于”面板那段版权排版</text>
   <text x="160" y="764" fill="#5B5046" font-size="20" font-family="Arial, PingFang SC, sans-serif">• 如果没有签名，首次运行可能会被 SmartScreen 提醒</text>
 
@@ -53,7 +53,7 @@
   <text x="1060" y="436" fill="#6D6153" font-size="24" font-family="Arial, PingFang SC, sans-serif">CodexLens</text>
   <rect x="760" y="494" width="520" height="84" rx="18" fill="#FFFFFF" stroke="#E8DDD1"/>
   <text x="790" y="540" fill="#2D2923" font-size="24" font-family="Arial, PingFang SC, sans-serif" font-weight="700">设置 → 应用</text>
-  <text x="1030" y="540" fill="#6D6153" font-size="24" font-family="Arial, PingFang SC, sans-serif">CodexLens 1.0.0</text>
+  <text x="1030" y="540" fill="#6D6153" font-size="24" font-family="Arial, PingFang SC, sans-serif">CodexLens 1.0.1</text>
 
   <g filter="url(#shadow)">
     <rect x="720" y="650" rx="28" ry="28" width="600" height="230" fill="#FFF9F1" stroke="#E7D6C3"/>

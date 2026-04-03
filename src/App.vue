@@ -7,6 +7,13 @@ import SessionVirtualList from './components/SessionVirtualList.vue'
 import TreeNodeItem from './components/TreeNodeItem.vue'
 import { maskDisplayText, maskDisplayValue } from './utils/display'
 import {
+  type AppLocale,
+  DEFAULT_APP_LOCALE,
+  getIntlLocale,
+  getMessages,
+  normalizeAppLocale,
+} from './shared/i18n'
+import {
   type ConversationItemDetail,
   ITEM_PAGE_SIZE,
   type FilePatchedPayload,
@@ -18,6 +25,8 @@ import {
   type TreeResponse,
 } from './shared/sessions'
 
+const APP_LOCALE_STORAGE_KEY = 'app.locale'
+const SETTINGS_AUTO_OPENED_STORAGE_KEY = 'settings.autoOpened'
 const SHOW_CONVERSATION_ONLY_STORAGE_KEY = 'timeline.showConversationOnly'
 
 const timelineRef = ref<InstanceType<typeof SessionVirtualList> | null>(null)
@@ -41,9 +50,13 @@ const deletingPath = ref<string | null>(null)
 const isAtLatestEdge = ref(true)
 const isDescending = ref(false)
 const fatalError = ref('')
+const locale = ref<AppLocale>(
+  readLocalePreference(APP_LOCALE_STORAGE_KEY, DEFAULT_APP_LOCALE),
+)
 const showConversationOnly = ref(
   readBooleanPreference(SHOW_CONVERSATION_ONLY_STORAGE_KEY, true),
 )
+const settingsOpen = ref(false)
 const conversationPreviewOpen = ref(false)
 const conversationPreviewLoading = ref(false)
 const conversationPreviewError = ref('')
@@ -59,6 +72,7 @@ interface ConversationPreviewItem extends ConversationItemDetail {
   html: string
 }
 
+const messages = computed(() => getMessages(locale.value))
 const hasSelection = computed(() => Boolean(selectedFilePath.value))
 const canPreviewConversation = computed(() => hasSelection.value && showConversationOnly.value)
 const loadedCount = computed(() => items.value.filter(Boolean).length)
@@ -101,7 +115,7 @@ const ownershipDisplayLabel = computed(() => {
   const meta = selectedMeta.value
 
   if (!meta) {
-    return '暂无'
+    return messages.value.common.noData
   }
 
   const parts = [
@@ -112,8 +126,20 @@ const ownershipDisplayLabel = computed(() => {
     (value): value is string => Boolean(value?.trim()),
   )
 
-  return parts.join(' / ') || '暂无'
+  return parts.join(' / ') || messages.value.common.noData
 })
+const displayCwd = computed(() =>
+  maskDisplayValue(selectedMeta.value?.cwd, messages.value.common.noData),
+)
+const displayOriginator = computed(() =>
+  maskDisplayValue(formatOriginator(selectedMeta.value?.originator), messages.value.common.noData),
+)
+const displayModelProvider = computed(() =>
+  maskDisplayValue(selectedMeta.value?.modelProvider, messages.value.common.noData),
+)
+const displaySource = computed(() =>
+  maskDisplayValue(formatSource(selectedMeta.value?.source), messages.value.common.noData),
+)
 const timelineEntries = computed(() => {
   const next: Array<{ actualIndex: number; item: SessionItemSummary | null }> = []
 
@@ -180,9 +206,20 @@ watch(selectedFilePath, (value, previousValue) => {
   }
 })
 
+watch(locale, (value, previousValue) => {
+  writeLocalePreference(APP_LOCALE_STORAGE_KEY, value)
+  setDocumentLanguage(value)
+
+  if (value !== previousValue && window.sessionsApi) {
+    void applyLocale(value)
+  }
+})
+
 onMounted(() => {
+  setDocumentLanguage(locale.value)
+
   if (!window.sessionsApi) {
-    fatalError.value = '桌面应用预加载桥接不可用，请通过应用入口启动。'
+    fatalError.value = messages.value.app.preloadUnavailable
     return
   }
 
@@ -202,7 +239,13 @@ onBeforeUnmount(() => {
 })
 
 async function bootstrap() {
+  await window.sessionsApi.setLocale(locale.value)
   await refreshTree({ preserveSelection: false, allowAutoSelect: true })
+
+  if (!readBooleanPreference(SETTINGS_AUTO_OPENED_STORAGE_KEY, false)) {
+    writeBooleanPreference(SETTINGS_AUTO_OPENED_STORAGE_KEY, true)
+    openSettings()
+  }
 }
 
 async function refreshTree(options: { preserveSelection: boolean; allowAutoSelect: boolean }) {
@@ -239,13 +282,24 @@ async function handlePickRoot() {
   await refreshTree({ preserveSelection: false, allowAutoSelect: true })
 }
 
+function openSettings() {
+  settingsOpen.value = true
+}
+
+function closeSettings() {
+  settingsOpen.value = false
+}
+
 async function handleDeleteFile(payload: { path: string; label: string }) {
   if (deletingPath.value) {
     return
   }
 
   const confirmed = window.confirm(
-    `确认删除这个本机会话文件吗？\n\n${maskDisplayText(payload.label)}\n${maskDisplayText(payload.path)}\n\n删除后无法恢复。`,
+    messages.value.app.confirmDelete(
+      maskDisplayText(payload.label),
+      maskDisplayText(payload.path),
+    ),
   )
 
   if (!confirmed) {
@@ -261,7 +315,7 @@ async function handleDeleteFile(payload: { path: string; label: string }) {
       allowAutoSelect: selectedFilePath.value === payload.path,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : '删除会话文件失败。'
+    const message = error instanceof Error ? error.message : messages.value.app.deleteFailed
     window.alert(message)
   } finally {
     deletingPath.value = null
@@ -598,16 +652,21 @@ async function handleRequestRange(payload: { start: number; end: number }) {
 }
 
 async function openRawItem(displayIndex: number) {
-  if (!selectedFilePath.value) {
-    return
-  }
-
-  const targetPath = selectedFilePath.value
   const index = mapDisplayIndexToActual(displayIndex)
 
   if (index < 0 || index >= totalCount.value) {
     return
   }
+
+  await openRawItemByActualIndex(index)
+}
+
+async function openRawItemByActualIndex(index: number) {
+  if (!selectedFilePath.value) {
+    return
+  }
+
+  const targetPath = selectedFilePath.value
 
   rawLoading.value = true
   rawError.value = ''
@@ -624,9 +683,52 @@ async function openRawItem(displayIndex: number) {
 
     rawDetail.value = detail
   } catch (error) {
-    rawError.value = error instanceof Error ? error.message : '读取原始 JSON 失败。'
+    rawError.value = error instanceof Error ? error.message : messages.value.app.readRawFailed
   } finally {
     rawLoading.value = false
+  }
+}
+
+async function applyLocale(nextLocale: AppLocale) {
+  if (!window.sessionsApi) {
+    return
+  }
+
+  const targetPath = selectedFilePath.value
+  const rawIndex = rawDetail.value?.index ?? null
+  const shouldReopenConversation = conversationPreviewOpen.value && showConversationOnly.value
+
+  await window.sessionsApi.setLocale(nextLocale)
+  await refreshTree({ preserveSelection: false, allowAutoSelect: false })
+
+  if (targetPath && containsPath(tree.value, targetPath)) {
+    try {
+      await openFile(targetPath)
+    } catch {
+      const firstFile = findFirstFile(tree.value)
+
+      if (firstFile) {
+        await openFile(firstFile.path)
+      } else {
+        clearSelection()
+      }
+    }
+  } else {
+    const firstFile = findFirstFile(tree.value)
+
+    if (firstFile) {
+      await openFile(firstFile.path)
+    } else {
+      clearSelection()
+    }
+  }
+
+  if (rawIndex !== null && selectedFilePath.value) {
+    await openRawItemByActualIndex(rawIndex)
+  }
+
+  if (shouldReopenConversation && selectedFilePath.value) {
+    await openConversationPreview()
   }
 }
 
@@ -669,7 +771,8 @@ async function openConversationPreview() {
       return
     }
 
-    conversationPreviewError.value = error instanceof Error ? error.message : '加载完整对话失败。'
+    conversationPreviewError.value =
+      error instanceof Error ? error.message : messages.value.app.loadConversationFailed
   } finally {
     if (selectedFilePath.value === targetPath) {
       conversationPreviewLoading.value = false
@@ -771,10 +874,16 @@ async function jumpToLatest() {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) {
-    return '暂无'
+    return messages.value.common.noData
   }
 
-  return new Date(value).toLocaleString('zh-CN', {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return messages.value.common.noData
+  }
+
+  return date.toLocaleString(getIntlLocale(locale.value), {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -791,9 +900,9 @@ function formatAuthMode(value: string | null | undefined): string | null {
 
   switch (value.trim().toLowerCase()) {
     case 'apikey':
-      return 'API 密钥'
+      return messages.value.enums.authModeApiKey
     case 'chatgpt':
-      return 'ChatGPT 登录'
+      return messages.value.enums.authModeChatgpt
     default:
       return value
   }
@@ -807,12 +916,12 @@ function formatOriginator(value: string | null | undefined): string | null {
   switch (value.trim().toLowerCase()) {
     case 'codex desktop':
     case 'codex_desktop':
-      return '桌面端'
+      return messages.value.enums.originatorDesktop
     case 'codex_exec':
-      return '执行器'
+      return messages.value.enums.originatorExec
     case 'codex cli':
     case 'codex_cli':
-      return 'CLI'
+      return messages.value.enums.originatorCli
     default:
       return value
   }
@@ -825,11 +934,11 @@ function formatSource(value: string | null | undefined): string | null {
 
   switch (value.trim().toLowerCase()) {
     case 'vscode':
-      return 'VS Code'
+      return messages.value.enums.sourceVscode
     case 'exec':
-      return '执行任务'
+      return messages.value.enums.sourceExec
     case 'cli':
-      return 'CLI'
+      return messages.value.enums.sourceCli
     default:
       return value
   }
@@ -842,6 +951,14 @@ async function renderMarkdownToHtml(markdown: string): Promise<string> {
   })
 
   return DOMPurify.sanitize(rendered)
+}
+
+function setLocaleValue(nextLocale: AppLocale): void {
+  locale.value = normalizeAppLocale(nextLocale)
+}
+
+function setDocumentLanguage(value: AppLocale): void {
+  document.documentElement.lang = value
 }
 
 function readBooleanPreference(key: string, fallback: boolean): boolean {
@@ -866,6 +983,22 @@ function writeBooleanPreference(key: string, value: boolean): void {
   }
 }
 
+function readLocalePreference(key: string, fallback: AppLocale): AppLocale {
+  try {
+    return normalizeAppLocale(window.localStorage.getItem(key) ?? fallback)
+  } catch {
+    return fallback
+  }
+}
+
+function writeLocalePreference(key: string, value: AppLocale): void {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // Ignore storage write failures and keep the in-memory preference.
+  }
+}
+
 function normalizeCountValue(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
     return value
@@ -880,20 +1013,37 @@ function normalizeCountValue(value: unknown): number | null {
     <aside class="sidebar">
       <div class="sidebar-panel">
         <div class="panel-heading">
-          <p>Codex 会话</p>
-          <button class="ghost-button" type="button" @click="handlePickRoot">
-            切换目录
+          <p>{{ messages.app.sidebarTitle }}</p>
+          <button
+            class="icon-button"
+            :aria-label="messages.app.openSettings"
+            :title="messages.app.openSettings"
+            type="button"
+            @click="openSettings"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="6.1" />
+              <circle cx="12" cy="12" r="2.65" />
+              <line x1="12" y1="2.8" x2="12" y2="5.15" />
+              <line x1="12" y1="18.85" x2="12" y2="21.2" />
+              <line x1="2.8" y1="12" x2="5.15" y2="12" />
+              <line x1="18.85" y1="12" x2="21.2" y2="12" />
+              <line x1="5.5" y1="5.5" x2="7.15" y2="7.15" />
+              <line x1="16.85" y1="16.85" x2="18.5" y2="18.5" />
+              <line x1="18.5" y1="5.5" x2="16.85" y2="7.15" />
+              <line x1="7.15" y1="16.85" x2="5.5" y2="18.5" />
+            </svg>
           </button>
         </div>
 
         <div class="root-chip">
-          <span>{{ rootAvailable ? '已连接' : '目录不可用' }}</span>
+          <span>{{ rootAvailable ? messages.app.connected : messages.app.directoryUnavailable }}</span>
           <code>{{ maskDisplayText(rootPath) }}</code>
         </div>
 
         <div class="sidebar-status">
-          <span>{{ isLoadingTree ? '正在刷新目录...' : '目录树已同步' }}</span>
-          <span v-if="lastUpdatedAt">更新于 {{ formatDate(lastUpdatedAt) }}</span>
+          <span>{{ isLoadingTree ? messages.app.syncingTree : messages.app.treeSynced }}</span>
+          <span v-if="lastUpdatedAt">{{ messages.common.updatedAt }} {{ formatDate(lastUpdatedAt) }}</span>
         </div>
       </div>
 
@@ -903,11 +1053,11 @@ function normalizeCountValue(value: unknown): number | null {
         </div>
 
         <div v-else-if="!rootAvailable" class="sidebar-empty">
-          当前根目录不存在，请点击“切换目录”选择新的会话目录。
+          {{ messages.app.rootMissing }}
         </div>
 
         <div v-else-if="tree.length === 0" class="sidebar-empty">
-          目录里还没有 `.jsonl` 会话文件。
+          {{ messages.app.noSessionFiles }}
         </div>
 
         <TreeNodeItem
@@ -915,6 +1065,7 @@ function normalizeCountValue(value: unknown): number | null {
           v-else
           :key="node.id"
           :deleting-path="deletingPath"
+          :locale="locale"
           :node="node"
           :selected-path="selectedFilePath"
           @delete="handleDeleteFile"
@@ -927,19 +1078,19 @@ function normalizeCountValue(value: unknown): number | null {
       <section class="workspace-header">
         <div v-if="hasSelection" class="session-header-card">
           <div>
-            <p class="eyebrow">当前会话</p>
+            <p class="eyebrow">{{ messages.common.currentSession }}</p>
             <h1>{{ selectedPreview ? maskDisplayText(selectedPreview.displayTitle) : '' }}</h1>
             <div class="session-stats">
               <span v-if="selectedPreview?.subtitle">{{ maskDisplayText(selectedPreview.subtitle) }}</span>
-              <span>{{ displayLoadedProgressCount }}/{{ displayTotalCount }}条记录已加载</span>
+              <span>{{ messages.app.loadedRecords(displayLoadedProgressCount, displayTotalCount) }}</span>
               <span v-if="displayLoadedCount > displayLoadedProgressCount">
-                {{ displayLoadedCount }} 条已缓存
+                {{ messages.app.cachedRecords(displayLoadedCount) }}
               </span>
             </div>
             <div v-if="selectedMeta?.timestamp || lastConversationAt" class="session-time-meta">
-              <span v-if="selectedMeta?.timestamp">开始于 {{ formatDate(selectedMeta.timestamp) }}</span>
-              <span v-if="lastConversationAt">最后一次对话 {{ formatDate(lastConversationAt) }}</span>
-              <span>归属 {{ ownershipDisplayLabel }}</span>
+              <span v-if="selectedMeta?.timestamp">{{ messages.app.startedAt }} {{ formatDate(selectedMeta.timestamp) }}</span>
+              <span v-if="lastConversationAt">{{ messages.app.lastConversationAt }} {{ formatDate(lastConversationAt) }}</span>
+              <span>{{ messages.app.ownership }} {{ ownershipDisplayLabel }}</span>
             </div>
             <div v-if="selectedPreview?.rawName" class="session-raw-name" :title="selectedPreview.rawName">
               {{ maskDisplayText(selectedPreview.rawName) }}
@@ -948,41 +1099,41 @@ function normalizeCountValue(value: unknown): number | null {
 
           <dl class="meta-grid">
             <div>
-              <dt>工作目录</dt>
-              <dd>{{ maskDisplayValue(selectedMeta?.cwd) }}</dd>
+              <dt>{{ messages.app.workdir }}</dt>
+              <dd>{{ displayCwd }}</dd>
             </div>
             <div>
-              <dt>发起端</dt>
-              <dd>{{ maskDisplayValue(selectedMeta?.originator) }}</dd>
+              <dt>{{ messages.app.originator }}</dt>
+              <dd>{{ displayOriginator }}</dd>
             </div>
             <div>
-              <dt>模型提供方</dt>
-              <dd>{{ maskDisplayValue(selectedMeta?.modelProvider) }}</dd>
+              <dt>{{ messages.app.modelProvider }}</dt>
+              <dd>{{ displayModelProvider }}</dd>
             </div>
             <div>
-              <dt>来源</dt>
-              <dd>{{ maskDisplayValue(selectedMeta?.source) }}</dd>
+              <dt>{{ messages.app.source }}</dt>
+              <dd>{{ displaySource }}</dd>
             </div>
           </dl>
         </div>
 
         <div v-else class="session-header-empty">
-          <p>从左侧选择一个 `.jsonl` 文件开始查看。</p>
+          <p>{{ messages.app.selectSessionPrompt }}</p>
         </div>
       </section>
 
       <section class="workspace-body">
         <div v-if="!hasSelection" class="timeline-empty">
-          <p>目录树准备好后，右侧会展示当前会话的消息流和原始 JSON。</p>
+          <p>{{ messages.app.timelineEmpty }}</p>
         </div>
 
         <template v-else>
           <div class="timeline-toolbar">
-            <span>{{ isLoadingFile ? '正在加载会话...' : '滚动会按需加载更多历史记录' }}</span>
+            <span>{{ isLoadingFile ? messages.app.loadingSession : messages.app.loadMoreHistory }}</span>
             <div class="timeline-toolbar-actions">
               <label class="toolbar-checkbox">
                 <input v-model="showConversationOnly" type="checkbox">
-                <span>只显示对话</span>
+                <span>{{ messages.app.conversationOnly }}</span>
               </label>
 
               <button
@@ -991,7 +1142,7 @@ function normalizeCountValue(value: unknown): number | null {
                 type="button"
                 @click="openConversationPreview"
               >
-                预览完整对话
+                {{ messages.app.previewConversation }}
               </button>
 
               <button
@@ -1000,7 +1151,7 @@ function normalizeCountValue(value: unknown): number | null {
                 type="button"
                 @click="toggleTimelineOrder(false)"
               >
-                切到顺序
+                {{ messages.app.switchToChronological }}
               </button>
               <button
                 v-else
@@ -1008,7 +1159,7 @@ function normalizeCountValue(value: unknown): number | null {
                 type="button"
                 @click="toggleTimelineOrder(true)"
               >
-                切到倒序
+                {{ messages.app.switchToReverse }}
               </button>
 
               <button
@@ -1017,7 +1168,7 @@ function normalizeCountValue(value: unknown): number | null {
                 type="button"
                 @click="jumpToLatest"
               >
-                有 {{ pendingNewCount }} 条新记录
+                {{ messages.app.newRecords(pendingNewCount) }}
               </button>
             </div>
           </div>
@@ -1025,6 +1176,7 @@ function normalizeCountValue(value: unknown): number | null {
           <SessionVirtualList
             ref="timelineRef"
             :items="timelineItems"
+            :locale="locale"
             @open-raw="openRawItem"
             @request-range="handleRequestRange"
             @scroll-state="isAtLatestEdge = isDescending ? $event.atTop : $event.atBottom"
@@ -1036,18 +1188,18 @@ function normalizeCountValue(value: unknown): number | null {
     <aside class="raw-panel" :class="{ 'raw-panel--open': rawDetail || rawLoading || rawError }">
       <div class="raw-panel-header">
         <div>
-          <p class="eyebrow">原始 JSON</p>
+          <p class="eyebrow">{{ messages.app.rawJson }}</p>
           <strong v-if="rawDetail">#{{ rawDetail.index }}</strong>
-          <strong v-else>按需查看</strong>
+          <strong v-else>{{ messages.common.onDemand }}</strong>
         </div>
 
         <button class="ghost-button" type="button" @click="closeRawPanel">
-          关闭
+          {{ messages.common.close }}
         </button>
       </div>
 
       <div v-if="rawLoading" class="raw-panel-body raw-panel-body--empty">
-        正在读取原始 JSON...
+        {{ messages.app.loadingRaw }}
       </div>
 
       <div v-else-if="rawError" class="raw-panel-body raw-panel-body--empty raw-panel-body--error">
@@ -1062,24 +1214,80 @@ function normalizeCountValue(value: unknown): number | null {
       </div>
 
       <div v-else class="raw-panel-body raw-panel-body--empty">
-        点击任意记录卡片，在这里查看格式化后的 JSON。
+        {{ messages.app.rawHint }}
       </div>
     </aside>
+
+    <section v-if="settingsOpen" class="settings-overlay" @click.self="closeSettings">
+      <div class="settings-dialog">
+        <div class="settings-header">
+          <div>
+            <p class="eyebrow">{{ messages.app.settingsTitle }}</p>
+            <h2>{{ messages.app.settingsTitle }}</h2>
+            <p class="settings-copy">{{ messages.app.settingsHint }}</p>
+          </div>
+
+          <button class="ghost-button" type="button" @click="closeSettings">
+            {{ messages.common.close }}
+          </button>
+        </div>
+
+        <div class="settings-body">
+          <section class="settings-section">
+            <div class="settings-section-copy">
+              <strong>{{ messages.app.switchDirectory }}</strong>
+              <span>{{ messages.app.currentDirectory }}</span>
+            </div>
+
+            <code class="settings-directory">{{ maskDisplayText(rootPath) }}</code>
+
+            <button class="primary-button" type="button" @click="handlePickRoot">
+              {{ messages.app.switchDirectory }}
+            </button>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-copy">
+              <strong>{{ messages.app.languageLabel }}</strong>
+            </div>
+
+            <div class="locale-switch" :aria-label="messages.app.languageLabel" role="group">
+              <button
+                class="locale-switch-button"
+                :class="{ 'locale-switch-button--active': locale === 'zh-CN' }"
+                type="button"
+                @click="setLocaleValue('zh-CN')"
+              >
+                {{ messages.app.localeZh }}
+              </button>
+              <button
+                class="locale-switch-button"
+                :class="{ 'locale-switch-button--active': locale === 'en' }"
+                type="button"
+                @click="setLocaleValue('en')"
+              >
+                {{ messages.app.localeEn }}
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
 
     <section v-if="conversationPreviewOpen" class="conversation-preview-overlay">
       <div class="conversation-preview-header">
         <div>
-          <p class="eyebrow">完整对话预览</p>
-          <h2>{{ selectedPreview ? maskDisplayText(selectedPreview.displayTitle) : '当前会话' }}</h2>
+          <p class="eyebrow">{{ messages.app.fullConversationPreview }}</p>
+          <h2>{{ selectedPreview ? maskDisplayText(selectedPreview.displayTitle) : messages.common.currentSession }}</h2>
         </div>
 
         <button class="ghost-button" type="button" @click="closeConversationPreview">
-          关闭
+          {{ messages.common.close }}
         </button>
       </div>
 
       <div v-if="conversationPreviewLoading" class="conversation-preview-body conversation-preview-body--empty">
-        正在渲染完整对话...
+        {{ messages.app.renderingConversation }}
       </div>
 
       <div
@@ -1090,7 +1298,7 @@ function normalizeCountValue(value: unknown): number | null {
       </div>
 
       <div v-else-if="conversationPreviewItems.length === 0" class="conversation-preview-body conversation-preview-body--empty">
-        当前会话没有可预览的完整对话内容。
+        {{ messages.app.noConversationPreview }}
       </div>
 
       <div v-else class="conversation-preview-body">

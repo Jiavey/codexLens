@@ -116,6 +116,42 @@ pre {
   color: var(--muted);
 }
 
+.panel-heading p {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.icon-button {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(72, 56, 38, 0.12);
+  transition:
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.icon-button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.9);
+}
+
 .root-chip {
   margin-top: 18px;
   padding: 14px;
@@ -139,6 +175,132 @@ pre {
   padding: 0;
   background: transparent;
   color: var(--text);
+}
+
+.locale-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(72, 56, 38, 0.12);
+}
+
+.locale-switch-button {
+  min-width: 56px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.2;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.locale-switch-button:hover {
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.locale-switch-button--active {
+  background: linear-gradient(135deg, rgba(15, 158, 140, 0.16), rgba(68, 95, 198, 0.12));
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(47, 42, 36, 0.16);
+  backdrop-filter: blur(6px);
+}
+
+.settings-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 250, 243, 0.98);
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  box-shadow: 0 24px 64px rgba(63, 48, 27, 0.18);
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 24px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header > div {
+  min-width: 0;
+}
+
+.settings-header h2 {
+  margin: 6px 0 0;
+  font-family: var(--heading-font);
+  font-size: clamp(24px, 2.4vw, 34px);
+  line-height: 1.08;
+}
+
+.settings-copy {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.settings-body {
+  padding: 22px 24px 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 22px;
+  background: var(--panel-strong);
+  border: 1px solid rgba(72, 56, 38, 0.12);
+}
+
+.settings-section-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-section-copy strong {
+  font-size: 16px;
+}
+
+.settings-section-copy span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.settings-directory {
+  display: block;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(15, 158, 140, 0.12);
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-status,

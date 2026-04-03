@@ -373,4 +373,53 @@ describe('sessions-parser', () => {
     expect(codexMarkdown).toBe('```ts\nconsole.log(\"ok\")\n```')
     expect(streamedMarkdown).toBeNull()
   })
+
+  it('supports english labels when parsing with the english locale', async () => {
+    const filePath = await createJsonl([
+      JSON.stringify({
+        timestamp: '2026-04-01T10:00:57.860Z',
+        type: 'session_meta',
+        payload: {
+          timestamp: '2026-04-01T10:00:57.860Z',
+          cwd: '/tmp/workspace',
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-04-01T10:02:23.938Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_image', image_url: 'file:///tmp/a.png' }],
+        },
+      }),
+    ])
+
+    const result = await parseSessionFile(filePath, 'en')
+    const markdown = extractConversationMarkdown(
+      JSON.stringify({
+        timestamp: '2026-04-01T10:02:23.938Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_image', image_url: 'file:///tmp/a.png' }],
+        },
+      }),
+      'en',
+    )
+
+    expect(result.items[0]).toMatchObject({
+      bucket: 'system',
+      title: 'Session metadata',
+      speakerLabel: 'System / Tool',
+    })
+    expect(result.items[1]).toMatchObject({
+      bucket: 'user',
+      title: 'User message',
+      textPreview: '[Image input]',
+      speakerLabel: 'User',
+    })
+    expect(markdown).toBe('> [Image input]')
+  })
 })

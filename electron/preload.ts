@@ -10,6 +10,7 @@ import type {
 } from '../src/shared/sessions.js'
 
 const api: SessionsApi = {
+  setLocale: (locale) => ipcRenderer.invoke('sessions:setLocale', locale),
   getRoot: () => ipcRenderer.invoke('sessions:getRoot'),
   pickRoot: () => ipcRenderer.invoke('sessions:pickRoot'),
   listTree: () => ipcRenderer.invoke('sessions:listTree'),

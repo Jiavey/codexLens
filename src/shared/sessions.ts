@@ -1,3 +1,5 @@
+import type { AppLocale } from './i18n.js'
+
 export const ITEM_PAGE_SIZE = 120
 
 export type TreeNodeKind = 'directory' | 'file'
@@ -120,6 +122,7 @@ export interface FilePatchedPayload {
 export type Unsubscribe = () => void
 
 export interface SessionsApi {
+  setLocale: (locale: AppLocale) => Promise<void>
   getRoot: () => Promise<RootInfo>
   pickRoot: () => Promise<RootInfo>
   listTree: () => Promise<TreeResponse>
@@ -131,22 +134,3 @@ export interface SessionsApi {
   onTreeChanged: (listener: (payload: TreeChangedPayload) => void) => Unsubscribe
   onFilePatched: (listener: (payload: FilePatchedPayload) => void) => Unsubscribe
 }
-
-export const BUCKET_UI = {
-  user: {
-    label: '用户',
-    color: '#0f9e8c',
-  },
-  codex: {
-    label: 'Codex',
-    color: '#dd5e3f',
-  },
-  developer: {
-    label: '开发者',
-    color: '#445fc6',
-  },
-  system: {
-    label: '系统 / 工具',
-    color: '#6d7481',
-  },
-} satisfies Record<SessionBucket, { label: string; color: string }>

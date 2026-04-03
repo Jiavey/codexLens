@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import type { AppLocale } from '../shared/i18n'
+import { getIntlLocale, getMessages } from '../shared/i18n'
 import type { SessionItemSummary } from '../shared/sessions'
 import { maskDisplayText } from '../utils/display'
 
 const props = withDefaults(
   defineProps<{
     items: Array<SessionItemSummary | null>
+    locale: AppLocale
     itemHeight?: number
   }>(),
   {
@@ -111,10 +114,16 @@ function scrollToIndex(index: number) {
 
 function formatTimestamp(value: string | null): string {
   if (!value) {
-    return '无时间'
+    return getMessages(props.locale).common.noTime
   }
 
-  return new Date(value).toLocaleString('zh-CN', {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return getMessages(props.locale).common.noTime
+  }
+
+  return date.toLocaleString(getIntlLocale(props.locale), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

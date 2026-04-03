@@ -6,7 +6,7 @@ An app that lets you inspect Codex conversation history with a magnifying-glass 
 
 [简体中文](./README.md) | English
 
-![Version](https://img.shields.io/badge/version-1.0.0-E46845)
+![Version](https://img.shields.io/badge/version-1.0.1-E46845)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-14A38B)
 ![Stack](https://img.shields.io/badge/stack-Vue%203%20%2B%20Vite%20%2B%20Electron-445FC6)
 
@@ -29,6 +29,7 @@ The app runs locally, only reads the session directory you choose, and does not 
 - Role-aware conversation timeline for `user`, `codex`, `developer`, and `system/tool`
 - Live updates when session files are appended or changed locally
 - Session deletion that also removes the matching thread record from `~/.codex/state_5.sqlite`
+- Chinese / English interface switching, with Chinese as the default language
 - Conversation-only mode with duplicate user-event filtering
 - Full conversation preview rendered as Markdown-style chat bubbles
 - On-demand raw JSON viewer with delayed loading to reduce memory pressure
@@ -39,6 +40,12 @@ The app runs locally, only reads the session directory you choose, and does not 
 npm install
 npm run dev
 ```
+
+## Settings
+
+- A settings button is available at the top of the left sidebar
+- The settings dialog lets you change the sessions folder and switch the interface language (Chinese / English)
+- The dialog opens automatically on the first launch after installation, and does not auto-open again afterward
 
 ## Build
 
@@ -89,7 +96,7 @@ It only reads the session directory selected by the user, plus the default `~/.c
 ## Release Notes
 
 - Current app name: `CodexLens`
-- Current release version: `1.0.0`
+- Current release version: `1.0.1`
 - Copyright: `Copyright © 2026 Weiweimao.`
 
 ## Open Source

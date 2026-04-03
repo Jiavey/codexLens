@@ -20,6 +20,12 @@ import {
   type TreeResponse,
 } from '../src/shared/sessions.js'
 import {
+  type AppLocale,
+  DEFAULT_APP_LOCALE,
+  getMessages,
+  normalizeAppLocale,
+} from '../src/shared/i18n.js'
+import {
   extractConversationMarkdown,
   parseSessionFile,
   parseSessionFileTail,
@@ -46,6 +52,7 @@ interface CachedPreview {
 
 export class SessionsService {
   private rootPath = DEFAULT_ROOT_PATH
+  private locale: AppLocale = DEFAULT_APP_LOCALE
   private rootWatcher: FSWatcher | null = null
   private activeFileWatcher: FSWatcher | null = null
   private activeFilePath: string | null = null
@@ -96,12 +103,27 @@ export class SessionsService {
     }
   }
 
+  async setLocale(locale: AppLocale): Promise<void> {
+    await this.init()
+    const nextLocale = normalizeAppLocale(locale)
+
+    if (this.locale === nextLocale) {
+      return
+    }
+
+    this.locale = nextLocale
+    this.contexts.clear()
+    this.previewCache.clear()
+    this.rawCache.clear()
+  }
+
   async pickRoot(): Promise<RootInfo> {
     await this.init()
+    const messages = getMessages(this.locale)
 
     const focusedWindow = BrowserWindow.getFocusedWindow()
     const options: OpenDialogOptions = {
-      title: '选择 Codex 会话目录',
+      title: messages.service.pickRootTitle,
       properties: ['openDirectory'],
       defaultPath: this.rootPath,
     }
@@ -131,10 +153,11 @@ export class SessionsService {
 
   async deleteFile(filePath: string): Promise<void> {
     await this.init()
+    const messages = getMessages(this.locale)
     const absolutePath = resolve(filePath)
 
     if (!this.isManagedSessionFile(absolutePath)) {
-      throw new Error('只能删除当前会话目录中的 .jsonl 文件。')
+      throw new Error(messages.service.deleteManagedOnly)
     }
 
     let stat
@@ -142,11 +165,11 @@ export class SessionsService {
     try {
       stat = await fs.stat(absolutePath)
     } catch {
-      throw new Error(`会话文件不存在：${basename(absolutePath)}`)
+      throw new Error(messages.service.deleteMissingFile(basename(absolutePath)))
     }
 
     if (!stat.isFile()) {
-      throw new Error('只能删除文件，不能删除目录。')
+      throw new Error(messages.service.deleteFileOnly)
     }
 
     if (this.activeFilePath === absolutePath) {
@@ -199,6 +222,7 @@ export class SessionsService {
 
   async getRawItem(filePath: string, index: number): Promise<RawItemResult> {
     await this.init()
+    const messages = getMessages(this.locale)
     const absolutePath = resolve(filePath)
     const cacheKey = `${absolutePath}:${index}`
     const cached = this.rawCache.get(cacheKey)
@@ -213,7 +237,7 @@ export class SessionsService {
     const item = context.items[index]
 
     if (!item) {
-      throw new Error(`Record ${index} not found in ${basename(filePath)}`)
+      throw new Error(messages.service.recordNotFound(index, basename(filePath)))
     }
 
     const rawText = await readRawRange(absolutePath, item.rawByteStart, item.rawByteEnd)
@@ -224,7 +248,7 @@ export class SessionsService {
     try {
       formattedJson = JSON.stringify(JSON.parse(rawText), null, 2)
     } catch {
-      parseError = 'This line is not valid JSON.'
+      parseError = messages.service.invalidJsonLine
     }
 
     const result: RawItemResult = {
@@ -254,7 +278,7 @@ export class SessionsService {
       }
 
       const rawText = await readRawRange(absolutePath, item.rawByteStart, item.rawByteEnd)
-      const markdown = extractConversationMarkdown(rawText)
+      const markdown = extractConversationMarkdown(rawText, this.locale)
 
       if (!markdown) {
         continue
@@ -317,7 +341,7 @@ export class SessionsService {
     }
 
     const startIndex = cached.items.length
-    const tail = await parseSessionFileTail(absolutePath, cached.fileSize, startIndex)
+    const tail = await parseSessionFileTail(absolutePath, cached.fileSize, startIndex, this.locale)
 
     if (tail.items.length === 0) {
       cached.fileSize = tail.fileSize
@@ -380,7 +404,7 @@ export class SessionsService {
   }
 
   private async refreshContext(filePath: string): Promise<CachedContext> {
-    const parsed = await parseSessionFile(filePath)
+    const parsed = await parseSessionFile(filePath, this.locale)
     const attributionInfo = readThreadAccountInfo(parsed.meta?.id)
     const cached: CachedContext = {
       ...parsed,
@@ -452,7 +476,7 @@ export class SessionsService {
     const grouped = new Map<string, TreeNode[]>()
 
     for (const fileNode of fileNodes) {
-      const projectName = fileNode.preview?.projectName || '未知项目'
+      const projectName = fileNode.preview?.projectName || getMessages(this.locale).parser.unknownProject
       const bucket = grouped.get(projectName)
 
       if (bucket) {
@@ -696,13 +720,14 @@ export class SessionsService {
     let preview: SessionPreview
 
     try {
-      preview = await readSessionPreview(filePath)
+      preview = await readSessionPreview(filePath, this.locale)
     } catch {
+      const unknownProject = getMessages(this.locale).parser.unknownProject
       preview = {
         rawName: fallbackName,
-        projectName: '未知项目',
+        projectName: unknownProject,
         displayTitle: fallbackName,
-        subtitle: '未知项目',
+        subtitle: unknownProject,
         startedAt: null,
       }
     }

@@ -2,6 +2,7 @@ import { Menu, app, BrowserWindow, ipcMain } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import type { AppLocale } from '../src/shared/i18n.js'
 import type { GetItemsRequest, RawItemRequest } from '../src/shared/sessions.js'
 import { SessionsService } from './sessions-service.js'
 
@@ -60,6 +61,7 @@ async function createMainWindow(): Promise<void> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle('sessions:setLocale', (_event, locale: AppLocale) => service.setLocale(locale))
   ipcMain.handle('sessions:getRoot', () => service.getRoot())
   ipcMain.handle('sessions:pickRoot', () => service.pickRoot())
   ipcMain.handle('sessions:listTree', () => service.listTree())

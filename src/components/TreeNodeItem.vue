@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
+import type { AppLocale } from '../shared/i18n'
+import { getMessages } from '../shared/i18n'
 import type { TreeNode } from '../shared/sessions'
 import { maskDisplayText } from '../utils/display'
 
@@ -11,6 +13,7 @@ defineOptions({
 const props = defineProps<{
   node: TreeNode
   depth?: number
+  locale: AppLocale
   deletingPath: string | null
   selectedPath: string | null
 }>()
@@ -24,6 +27,7 @@ const expanded = ref((props.depth ?? 0) < 2)
 
 const isDirectory = computed(() => props.node.kind === 'directory')
 const isDeleting = computed(() => !isDirectory.value && props.deletingPath === props.node.path)
+const messages = computed(() => getMessages(props.locale))
 const rowClass = computed(() => ({
   'tree-row--active': props.selectedPath === props.node.path,
   'tree-row--directory': isDirectory.value,
@@ -119,11 +123,11 @@ function formatSize(size?: number): string {
         v-if="!isDirectory"
         class="tree-delete-button"
         :disabled="isDeleting"
-        :title="isDeleting ? '正在删除...' : '删除本地会话文件'"
+        :title="isDeleting ? messages.app.deletingLocalSession : messages.app.deleteLocalSessionFile"
         type="button"
         @click.stop="requestDelete"
       >
-        {{ isDeleting ? '...' : '删' }}
+        {{ isDeleting ? '...' : (props.locale === 'en' ? 'Del' : '删') }}
       </button>
     </div>
 
@@ -133,6 +137,7 @@ function formatSize(size?: number): string {
         :key="child.id"
         :depth="(depth ?? 0) + 1"
         :deleting-path="deletingPath"
+        :locale="props.locale"
         :node="child"
         :selected-path="selectedPath"
         @delete="emitDeleteFromChild"

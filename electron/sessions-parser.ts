@@ -3,12 +3,18 @@ import { createReadStream, promises as fs } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 import {
-  BUCKET_UI,
-  type SessionBucket,
   type SessionItemSummary,
+  type SessionBucket,
   type SessionMetaSummary,
   type SessionPreview,
 } from '../src/shared/sessions.js'
+import {
+  type AppLocale,
+  DEFAULT_APP_LOCALE,
+  getBucketUi,
+  getIntlLocale,
+  getMessages,
+} from '../src/shared/i18n.js'
 
 export interface ParsedFileContext {
   path: string
@@ -42,21 +48,24 @@ interface PreviewState {
   firstAssistant: string | null
 }
 
-export async function parseSessionFile(filePath: string): Promise<ParsedFileContext> {
+export async function parseSessionFile(
+  filePath: string,
+  locale: AppLocale = DEFAULT_APP_LOCALE,
+): Promise<ParsedFileContext> {
   const items: SessionItemSummary[] = []
   const previewState: PreviewState = createPreviewState()
   const streamResult = await streamJsonl(filePath, 0, (rawLine, rawByteStart, rawByteEnd) => {
-    const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, items.length)
+    const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, items.length, locale)
     items.push(parsedLine.summary)
 
-    collectPreviewFromRawLine(rawLine, previewState, parsedLine.meta)
+    collectPreviewFromRawLine(rawLine, previewState, locale, parsedLine.meta)
   })
   const stat = await fs.stat(filePath)
 
   return {
     path: filePath,
     name: basename(filePath),
-    preview: buildSessionPreview(basename(filePath), previewState),
+    preview: buildSessionPreview(basename(filePath), previewState, locale),
     items,
     meta: previewState.meta,
     fileSize: streamResult.nextOffset,
@@ -64,7 +73,10 @@ export async function parseSessionFile(filePath: string): Promise<ParsedFileCont
   }
 }
 
-export async function readSessionPreview(filePath: string): Promise<SessionPreview> {
+export async function readSessionPreview(
+  filePath: string,
+  locale: AppLocale = DEFAULT_APP_LOCALE,
+): Promise<SessionPreview> {
   const stream = createReadStream(filePath, { encoding: 'utf8' })
   const reader = createInterface({
     input: stream,
@@ -76,7 +88,7 @@ export async function readSessionPreview(filePath: string): Promise<SessionPrevi
   try {
     for await (const rawLine of reader) {
       lineCount += 1
-      collectPreviewFromRawLine(rawLine, previewState)
+      collectPreviewFromRawLine(rawLine, previewState, locale)
 
       if (hasEnoughPreviewData(previewState) || lineCount >= 80) {
         reader.close()
@@ -89,20 +101,21 @@ export async function readSessionPreview(filePath: string): Promise<SessionPrevi
     stream.destroy()
   }
 
-  return buildSessionPreview(basename(filePath), previewState)
+  return buildSessionPreview(basename(filePath), previewState, locale)
 }
 
 export async function parseSessionFileTail(
   filePath: string,
   fromByte: number,
   startIndex: number,
+  locale: AppLocale = DEFAULT_APP_LOCALE,
 ): Promise<{ items: SessionItemSummary[]; fileSize: number; mtime: number }> {
   const items: SessionItemSummary[] = []
   const streamResult = await streamJsonl(
     filePath,
     fromByte,
     (rawLine, rawByteStart, rawByteEnd) => {
-      const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, startIndex + items.length)
+      const parsedLine = parseLine(rawLine, rawByteStart, rawByteEnd, startIndex + items.length, locale)
       items.push(parsedLine.summary)
     },
     { emitTrailingPartial: false },
@@ -135,7 +148,12 @@ export async function readRawRange(filePath: string, start: number, end: number)
   return Buffer.concat(chunks).toString('utf8')
 }
 
-export function extractConversationMarkdown(rawLine: string): string | null {
+export function extractConversationMarkdown(
+  rawLine: string,
+  locale: AppLocale = DEFAULT_APP_LOCALE,
+): string | null {
+  const messages = getMessages(locale)
+
   if (!rawLine.trim()) {
     return null
   }
@@ -150,12 +168,12 @@ export function extractConversationMarkdown(rawLine: string): string | null {
       const responseRole = readString(payload.role)
 
       if (responseRole === 'user' || responseRole === 'assistant') {
-        return extractContentMarkdown(payload)
+        return extractContentMarkdown(payload, locale)
       }
     }
 
     if (type === 'event_msg' && payload && payloadType === 'user_message') {
-      return normalizeMarkdownText(readString(payload.message) ?? '用户消息事件')
+      return normalizeMarkdownText(readString(payload.message) ?? messages.parser.userMessageEvent)
     }
   } catch {
     return null
@@ -218,7 +236,15 @@ function normalizeRawLineEnd(buffer: Buffer, fallbackEnd: number): number {
   return buffer.at(-1) === 0x0d ? fallbackEnd - 1 : fallbackEnd
 }
 
-function parseLine(rawLine: string, rawByteStart: number, rawByteEnd: number, index: number): ParsedLine {
+function parseLine(
+  rawLine: string,
+  rawByteStart: number,
+  rawByteEnd: number,
+  index: number,
+  locale: AppLocale,
+): ParsedLine {
+  const messages = getMessages(locale)
+
   if (!rawLine.trim()) {
     return {
       summary: createSummary({
@@ -226,11 +252,11 @@ function parseLine(rawLine: string, rawByteStart: number, rawByteEnd: number, in
         bucket: 'system',
         role: 'blank_line',
         timestamp: null,
-        title: '空行',
-        textPreview: '空 JSONL 行',
+        title: messages.parser.blankLine,
+        textPreview: messages.parser.emptyJsonlLine,
         rawByteStart,
         rawByteEnd,
-      }),
+      }, locale),
       meta: null,
     }
   }
@@ -240,7 +266,7 @@ function parseLine(rawLine: string, rawByteStart: number, rawByteEnd: number, in
     const meta = extractMeta(parsed)
 
     return {
-      summary: summarizeParsedLine(parsed, rawByteStart, rawByteEnd, index),
+      summary: summarizeParsedLine(parsed, rawByteStart, rawByteEnd, index, locale),
       meta,
     }
   } catch {
@@ -250,11 +276,11 @@ function parseLine(rawLine: string, rawByteStart: number, rawByteEnd: number, in
         bucket: 'system',
         role: 'parse_error',
         timestamp: null,
-        title: 'JSON 格式错误',
+        title: messages.parser.invalidJson,
         textPreview: truncate(rawLine, 240),
         rawByteStart,
         rawByteEnd,
-      }),
+      }, locale),
       meta: null,
     }
   }
@@ -272,6 +298,7 @@ function createPreviewState(): PreviewState {
 function collectPreviewFromRawLine(
   rawLine: string,
   previewState: PreviewState,
+  locale: AppLocale,
   parsedMeta?: SessionMetaSummary | null,
 ): void {
   if (!rawLine.trim()) {
@@ -280,7 +307,7 @@ function collectPreviewFromRawLine(
 
   try {
     const parsed = JSON.parse(rawLine) as JsonObject
-    collectPreviewFromRecord(parsed, previewState, parsedMeta)
+    collectPreviewFromRecord(parsed, previewState, locale, parsedMeta)
   } catch {
     // Ignore malformed lines for title generation.
   }
@@ -289,6 +316,7 @@ function collectPreviewFromRawLine(
 function collectPreviewFromRecord(
   record: JsonObject,
   previewState: PreviewState,
+  locale: AppLocale,
   parsedMeta?: SessionMetaSummary | null,
 ): void {
   if (!previewState.firstTimestamp) {
@@ -312,7 +340,7 @@ function collectPreviewFromRecord(
     readString(payload.type) === 'message' &&
     readString(payload.role) === 'user'
   ) {
-    const candidate = normalizeInlineText(extractContentPreview(payload))
+    const candidate = normalizeInlineText(extractContentPreview(payload, locale))
 
     if (candidate && !isInjectedInstruction(candidate)) {
       previewState.firstEffectiveUser = candidate
@@ -325,7 +353,7 @@ function collectPreviewFromRecord(
     readString(payload.type) === 'message' &&
     readString(payload.role) === 'assistant'
   ) {
-    const candidate = normalizeInlineText(extractContentPreview(payload))
+    const candidate = normalizeInlineText(extractContentPreview(payload, locale))
 
     if (candidate) {
       previewState.firstAssistant = candidate
@@ -337,13 +365,23 @@ function hasEnoughPreviewData(previewState: PreviewState): boolean {
   return Boolean(previewState.meta && (previewState.firstEffectiveUser || previewState.firstAssistant))
 }
 
-function buildSessionPreview(fileName: string, previewState: PreviewState): SessionPreview {
-  const projectName = normalizeInlineText(previewState.meta?.cwd?.split(/[\\/]/).pop() ?? '') || '未知项目'
+function buildSessionPreview(
+  fileName: string,
+  previewState: PreviewState,
+  locale: AppLocale,
+): SessionPreview {
+  const messages = getMessages(locale)
+  const projectName =
+    normalizeInlineText(previewState.meta?.cwd?.split(/[\\/]/).pop() ?? '') ||
+    messages.parser.unknownProject
   const rawTitle =
     previewState.firstEffectiveUser ??
     previewState.firstAssistant ??
-    `${projectName} 会话`
-  const timeLabel = formatPreviewTimestamp(previewState.meta?.timestamp ?? previewState.firstTimestamp)
+    `${projectName} ${messages.parser.sessionSuffix}`
+  const timeLabel = formatPreviewTimestamp(
+    previewState.meta?.timestamp ?? previewState.firstTimestamp,
+    locale,
+  )
 
   return {
     rawName: fileName,
@@ -362,7 +400,9 @@ function summarizeParsedLine(
   rawByteStart: number,
   rawByteEnd: number,
   index: number,
+  locale: AppLocale,
 ): SessionItemSummary {
+  const messages = getMessages(locale)
   const timestamp = readString(record.timestamp)
   const type = readString(record.type) ?? 'unknown'
   const payload = readObject(record.payload)
@@ -377,11 +417,11 @@ function summarizeParsedLine(
         bucket: 'user',
         role: responseRole,
         timestamp,
-        title: '用户消息',
-        textPreview: extractContentPreview(payload),
+        title: messages.parser.userMessage,
+        textPreview: extractContentPreview(payload, locale),
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
 
     if (responseRole === 'assistant') {
@@ -390,11 +430,11 @@ function summarizeParsedLine(
         bucket: 'codex',
         role: responseRole,
         timestamp,
-        title: 'Codex 回复',
-        textPreview: extractContentPreview(payload),
+        title: messages.parser.codexReply,
+        textPreview: extractContentPreview(payload, locale),
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
 
     if (responseRole === 'developer') {
@@ -403,11 +443,11 @@ function summarizeParsedLine(
         bucket: 'developer',
         role: responseRole,
         timestamp,
-        title: '开发者指令',
-        textPreview: extractContentPreview(payload),
+        title: messages.parser.developerInstruction,
+        textPreview: extractContentPreview(payload, locale),
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
   }
 
@@ -418,11 +458,11 @@ function summarizeParsedLine(
         bucket: 'user',
         role: payloadType,
         timestamp,
-        title: '用户消息',
-        textPreview: readString(payload.message) ?? '用户消息事件',
+        title: messages.parser.userMessage,
+        textPreview: readString(payload.message) ?? messages.parser.userMessageEvent,
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
 
     if (payloadType === 'agent_message') {
@@ -431,23 +471,23 @@ function summarizeParsedLine(
         bucket: 'codex',
         role: payloadType,
         timestamp,
-        title: 'Codex 流式更新',
-        textPreview: readString(payload.message) ?? '助手消息事件',
+        title: messages.parser.codexStreamingUpdate,
+        textPreview: readString(payload.message) ?? messages.parser.assistantMessageEvent,
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
 
     return createSummary({
       index,
       bucket: 'system',
-      role: payloadType ?? type,
-      timestamp,
-      title: humanize(payloadType ?? type),
-      textPreview: truncate(readString(payload.message) ?? stringifyPreview(payload), 240),
-      rawByteStart,
-      rawByteEnd,
-    })
+        role: payloadType ?? type,
+        timestamp,
+        title: humanize(payloadType ?? type),
+        textPreview: truncate(readString(payload.message) ?? stringifyPreview(payload), 240),
+        rawByteStart,
+        rawByteEnd,
+    }, locale)
   }
 
   if (type === 'session_meta') {
@@ -460,11 +500,11 @@ function summarizeParsedLine(
       bucket: 'system',
       role: type,
       timestamp,
-      title: '会话元数据',
-      textPreview: preview || '会话元数据快照',
+      title: messages.parser.sessionMetadata,
+      textPreview: preview || messages.parser.sessionMetadataSnapshot,
       rawByteStart,
       rawByteEnd,
-    })
+    }, locale)
   }
 
   if (type === 'turn_context') {
@@ -473,11 +513,11 @@ function summarizeParsedLine(
       bucket: 'system',
       role: type,
       timestamp,
-      title: '轮次上下文',
-      textPreview: '会话上下文检查点',
+      title: messages.parser.turnContext,
+      textPreview: messages.parser.turnContextCheckpoint,
       rawByteStart,
       rawByteEnd,
-    })
+    }, locale)
   }
 
   if (type === 'response_item' && payload) {
@@ -487,11 +527,11 @@ function summarizeParsedLine(
         bucket: 'system',
         role: payloadType,
         timestamp,
-        title: '推理',
-        textPreview: '模型推理摘要',
+        title: messages.parser.reasoning,
+        textPreview: messages.parser.reasoningSummary,
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
 
     if (payloadType === 'function_call') {
@@ -503,11 +543,11 @@ function summarizeParsedLine(
         bucket: 'system',
         role: payloadType,
         timestamp,
-        title: `工具调用 · ${fnName}`,
+        title: `${messages.parser.toolCall} · ${fnName}`,
         textPreview: preview,
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
 
     if (payloadType === 'function_call_output') {
@@ -516,11 +556,11 @@ function summarizeParsedLine(
         bucket: 'system',
         role: payloadType,
         timestamp,
-        title: '工具输出',
+        title: messages.parser.toolOutput,
         textPreview: truncate(readString(payload.output) ?? stringifyPreview(payload), 220),
         rawByteStart,
         rawByteEnd,
-      })
+      }, locale)
     }
   }
 
@@ -533,7 +573,7 @@ function summarizeParsedLine(
     textPreview: truncate(stringifyPreview(payload ?? record), 220),
     rawByteStart,
     rawByteEnd,
-  })
+  }, locale)
 }
 
 function extractMeta(record: JsonObject): SessionMetaSummary | null {
@@ -560,7 +600,8 @@ function extractMeta(record: JsonObject): SessionMetaSummary | null {
   }
 }
 
-function extractContentPreview(payload: JsonObject): string {
+function extractContentPreview(payload: JsonObject, locale: AppLocale): string {
+  const messages = getMessages(locale)
   const content = Array.isArray(payload.content) ? payload.content : []
   const parts: string[] = []
 
@@ -579,17 +620,18 @@ function extractContentPreview(payload: JsonObject): string {
     }
 
     if (type === 'input_image') {
-      parts.push('[图片输入]')
+      parts.push(`[${messages.parser.imageInput}]`)
       continue
     }
 
     parts.push(`[${type ?? 'unknown'}]`)
   }
 
-  return truncate(normalizeInlineText(parts.filter(Boolean).join(' ')) || '无文本内容', 280)
+  return truncate(normalizeInlineText(parts.filter(Boolean).join(' ')) || messages.parser.noTextContent, 280)
 }
 
-function extractContentMarkdown(payload: JsonObject): string {
+function extractContentMarkdown(payload: JsonObject, locale: AppLocale): string {
+  const messages = getMessages(locale)
   const content = Array.isArray(payload.content) ? payload.content : []
   const parts: string[] = []
 
@@ -608,14 +650,14 @@ function extractContentMarkdown(payload: JsonObject): string {
     }
 
     if (type === 'input_image') {
-      parts.push('> [图片输入]')
+      parts.push(`> [${messages.parser.imageInput}]`)
       continue
     }
 
     parts.push(`> [${type ?? 'unknown'}]`)
   }
 
-  return parts.filter(Boolean).join('\n\n').trim() || '无文本内容'
+  return parts.filter(Boolean).join('\n\n').trim() || messages.parser.noTextContent
 }
 
 function normalizeMarkdownText(value: string): string {
@@ -630,7 +672,7 @@ function isInjectedInstruction(value: string): boolean {
   return value.includes('AGENTS.md instructions')
 }
 
-function formatPreviewTimestamp(value: string | null | undefined): string {
+function formatPreviewTimestamp(value: string | null | undefined, locale: AppLocale): string {
   if (!value) {
     return ''
   }
@@ -641,7 +683,7 @@ function formatPreviewTimestamp(value: string | null | undefined): string {
     return ''
   }
 
-  return date.toLocaleString('zh-CN', {
+  return date.toLocaleString(getIntlLocale(locale), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -658,16 +700,19 @@ function createSummary(input: {
   textPreview: string
   rawByteStart: number
   rawByteEnd: number
-}): SessionItemSummary {
+}, locale: AppLocale): SessionItemSummary {
+  const messages = getMessages(locale)
+  const bucketUi = getBucketUi(locale)
+
   return {
     index: input.index,
     timestamp: input.timestamp,
     bucket: input.bucket,
     role: input.role,
-    speakerLabel: BUCKET_UI[input.bucket].label,
-    avatarColor: BUCKET_UI[input.bucket].color,
+    speakerLabel: bucketUi[input.bucket].label,
+    avatarColor: bucketUi[input.bucket].color,
     title: input.title,
-    textPreview: normalizeInlineText(input.textPreview) || '无文本内容',
+    textPreview: normalizeInlineText(input.textPreview) || messages.parser.noTextContent,
     rawByteStart: input.rawByteStart,
     rawByteEnd: input.rawByteEnd,
   }
