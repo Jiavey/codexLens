@@ -21,6 +21,7 @@ The app runs locally, only reads the session directory you choose, and does not 
 ## Documentation
 
 - macOS installation guide: [macOS Installation Guide](./docs/macos-install.en.md)
+- Page display: [Page Display](./docs/page-display.en.md)
 - Chinese installation guide: [macos安装说明](./docs/macos-install.md)
 
 ## Features
