@@ -12,23 +12,30 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function createTempDatabase(): Promise<string> {
+async function createTempDatabase(options?: { includeLogs?: boolean }): Promise<string> {
+  const { includeLogs = true } = options ?? {}
   const dir = await mkdtemp(join(tmpdir(), 'codex-thread-store-'))
   tempDirs.push(dir)
   const dbPath = join(dir, 'state_5.sqlite')
   const db = new DatabaseSync(dbPath)
 
   try {
+    const createLogsTableSql = includeLogs
+      ? `
+      CREATE TABLE logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id TEXT
+      );
+    `
+      : ''
+
     db.exec(`
       CREATE TABLE threads (
         id TEXT PRIMARY KEY,
         rollout_path TEXT NOT NULL
       );
 
-      CREATE TABLE logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        thread_id TEXT
-      );
+      ${createLogsTableSql}
 
       CREATE TABLE thread_spawn_edges (
         parent_thread_id TEXT NOT NULL,
@@ -62,8 +69,10 @@ async function createTempDatabase(): Promise<string> {
       'thread-2',
       '/tmp/other-session.jsonl',
     )
-    db.prepare('INSERT INTO logs (thread_id) VALUES (?)').run('thread-1')
-    db.prepare('INSERT INTO logs (thread_id) VALUES (?)').run('thread-2')
+    if (includeLogs) {
+      db.prepare('INSERT INTO logs (thread_id) VALUES (?)').run('thread-1')
+      db.prepare('INSERT INTO logs (thread_id) VALUES (?)').run('thread-2')
+    }
     db.prepare(
       'INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id, status) VALUES (?, ?, ?)',
     ).run('thread-1', 'thread-child', 'completed')
@@ -141,5 +150,49 @@ describe('thread-store', () => {
       matchedThreadIds: [],
       deletedThreadCount: 0,
     })
+  })
+
+  it('deletes the matching thread when logs table is absent', async () => {
+    const dbPath = await createTempDatabase({ includeLogs: false })
+
+    const result = deleteThreadRecordsForRolloutPath('/tmp/session-1.jsonl', dbPath)
+
+    expect(result).toEqual({
+      matchedThreadIds: ['thread-1'],
+      deletedThreadCount: 1,
+    })
+
+    const db = new DatabaseSync(dbPath)
+
+    try {
+      expect(db.prepare('SELECT COUNT(*) AS count FROM threads WHERE id = ?').get('thread-1')).toMatchObject({
+        count: 0,
+      })
+      expect(
+        db.prepare(
+          'SELECT COUNT(*) AS count FROM thread_spawn_edges WHERE parent_thread_id = ? OR child_thread_id = ?',
+        ).get('thread-1', 'thread-1'),
+      ).toMatchObject({
+        count: 0,
+      })
+      expect(
+        db.prepare('SELECT assigned_thread_id FROM agent_job_items WHERE job_id = ? AND item_id = ?').get(
+          'job-1',
+          'item-1',
+        ),
+      ).toMatchObject({
+        assigned_thread_id: null,
+      })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM stage1_outputs WHERE thread_id = ?').get('thread-1')).toMatchObject({
+        count: 0,
+      })
+      expect(
+        db.prepare('SELECT COUNT(*) AS count FROM thread_dynamic_tools WHERE thread_id = ?').get('thread-1'),
+      ).toMatchObject({
+        count: 0,
+      })
+    } finally {
+      db.close()
+    }
   })
 })
