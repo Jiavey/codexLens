@@ -77,8 +77,7 @@ npm run dist:mac
 Windows 安装包使用 `NSIS` 生成：
 
 ```bash
-npx electron-builder --config electron-builder.yml --win nsis --x64
-npx electron-builder --config electron-builder.yml --win nsis --arm64
+npm run dist:win
 ```
 
 ## 权限说明

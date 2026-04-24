@@ -28,6 +28,7 @@
     "dist:mac:zip": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac zip",
     "dist:mac:dmg": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac dmg",
     "dist:mac": "npm run build:icon:mac && npm run build && electron-builder --config electron-builder.yml --mac dmg zip",
+    "dist:win": "npm run build && electron-builder --config electron-builder.yml --win nsis --x64",
     "preview": "vite preview",
     "start": "electron dist-electron/electron/main.js",
     "test": "vitest run"

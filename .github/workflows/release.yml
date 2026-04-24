@@ -1,0 +1,237 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'V*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to upload artifacts to, for example V1.0.1-hotfix
+        required: true
+        type: string
+      ref:
+        description: Git ref to build from, defaults to main for manual runs
+        required: false
+        default: main
+        type: string
+      platforms:
+        description: Platforms to build
+        required: true
+        default: windows
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      checkout_ref: ${{ steps.vars.outputs.checkout_ref }}
+      build_macos: ${{ steps.vars.outputs.build_macos }}
+      build_windows: ${{ steps.vars.outputs.build_windows }}
+    steps:
+      - id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            checkout_ref="${{ inputs.ref }}"
+            platforms="${{ inputs.platforms }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            checkout_ref="${GITHUB_REF}"
+            platforms="all"
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "Release tag is required." >&2
+            exit 1
+          fi
+
+          if [ -z "$checkout_ref" ]; then
+            checkout_ref="$tag"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
+
+          case "$platforms" in
+            all)
+              echo "build_macos=true" >> "$GITHUB_OUTPUT"
+              echo "build_windows=true" >> "$GITHUB_OUTPUT"
+              ;;
+            macos)
+              echo "build_macos=true" >> "$GITHUB_OUTPUT"
+              echo "build_windows=false" >> "$GITHUB_OUTPUT"
+              ;;
+            windows)
+              echo "build_macos=false" >> "$GITHUB_OUTPUT"
+              echo "build_windows=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported platforms value: $platforms" >&2
+              exit 1
+              ;;
+          esac
+
+  build-macos:
+    needs: prepare
+    if: needs.prepare.outputs.build_macos == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run dist:mac
+
+      - name: Collect macOS artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          find release -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' \) -exec cp {} artifacts/ \;
+          ls -la artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: artifacts/*
+          if-no-files-found: error
+
+  build-windows:
+    needs: prepare
+    if: needs.prepare.outputs.build_windows == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run dist:win
+
+      - name: Collect Windows artifacts
+        run: |
+          mkdir -p artifacts
+          find release -maxdepth 1 -type f -name '*.exe' -exec cp {} artifacts/ \;
+          ls -la artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: artifacts/*
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - prepare
+      - build-macos
+      - build-windows
+    if: >
+      always() &&
+      !cancelled() &&
+      (needs.prepare.outputs.build_macos != 'true' || needs.build-macos.result == 'success') &&
+      (needs.prepare.outputs.build_windows != 'true' || needs.build-windows.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-upload
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release-upload
+          mapfile -t files < <(find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) | sort)
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release artifacts found." >&2
+            exit 1
+          fi
+
+          : > SHA256SUMS.txt
+          for file in "${files[@]}"; do
+            digest=$(sha256sum "$file" | awk '{print $1}')
+            echo "$digest  $(basename "$file")" >> SHA256SUMS.txt
+          done
+
+          ls -la
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists, uploading assets."
+
+            mapfile -t current_files < <(find release-upload -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) -exec basename {} \; | sort)
+            : > release-upload/SHA256SUMS.merged.txt
+
+            while IFS=$'\t' read -r asset_name asset_digest; do
+              if [ -z "$asset_name" ] || [ -z "$asset_digest" ]; then
+                continue
+              fi
+
+              if [[ "$asset_digest" != sha256:* ]]; then
+                continue
+              fi
+
+              if [[ " ${current_files[*]} " == *" $asset_name "* ]]; then
+                continue
+              fi
+
+              echo "${asset_digest#sha256:}  $asset_name" >> release-upload/SHA256SUMS.merged.txt
+            done < <(
+              gh release view "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json assets \
+                --jq '.assets[] | select(.name != "SHA256SUMS.txt") | [.name, .digest] | @tsv'
+            )
+
+            cat release-upload/SHA256SUMS.txt >> release-upload/SHA256SUMS.merged.txt
+            sort -k2 release-upload/SHA256SUMS.merged.txt > release-upload/SHA256SUMS.txt
+            rm -f release-upload/SHA256SUMS.merged.txt
+          else
+            if [ "${{ github.event_name }}" = "push" ]; then
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "$RELEASE_TAG" \
+                --generate-notes \
+                --latest
+            else
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "$RELEASE_TAG" \
+                --generate-notes
+            fi
+          fi
+
+          gh release upload "$RELEASE_TAG" release-upload/* --repo "$GITHUB_REPOSITORY" --clobber

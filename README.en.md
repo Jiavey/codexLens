@@ -77,8 +77,7 @@ npm run dist:mac
 NSIS installers can be built with `electron-builder`:
 
 ```bash
-npx electron-builder --config electron-builder.yml --win nsis --x64
-npx electron-builder --config electron-builder.yml --win nsis --arm64
+npm run dist:win
 ```
 
 ## Permissions

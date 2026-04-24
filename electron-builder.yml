@@ -34,3 +34,10 @@ mac:
     NSDownloadsFolderUsageDescription: 允许应用读取你选择的下载会话目录。
     NSNetworkVolumesUsageDescription: 允许应用读取你选择的网络磁盘会话目录。
     NSRemovableVolumesUsageDescription: 允许应用读取你选择的外接磁盘会话目录。
+
+win:
+  icon: build/icon-preview.png
+  target:
+    - target: nsis
+      arch:
+        - x64
